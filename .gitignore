@@ -1,0 +1,14 @@
+venv/
+authentication/migrations/
+authentication/__pycache__/
+campaigns/migrations/
+campaigns/__pycache__/
+campaigns/management/__pycache__/
+campaigns/management/commands/__pycache__/
+whatsapp_campaign/__pycache__/
+whatsapp_campaign_streamlit/__pycache__/
+whatsapp_campaign_streamlit/components/__pycache__/
+whatsapp_campaign_streamlit/pages/__pycache__/
+whatsapp_campaign_streamlit/venv-frontend/
+whatsapp_campaign_streamlit/.streamlit/
+media/

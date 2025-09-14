@@ -1,0 +1,78 @@
+[2025-09-11 21:24:16,763: WARNING/MainProcess] /home/sohan/whatsapp-campaign/venv/lib/python3.10/site-packages/celery/worker/consumer/consumer.py:507: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+whether broker connection retries are made during startup in Celery 6.0 and above.
+If you wish to retain the existing behavior for retrying connections on startup,
+you should set broker_connection_retry_on_startup to True.
+  warnings.warn(
+
+[2025-09-11 21:24:16,768: INFO/MainProcess] Connected to amqp://guest:**@127.0.0.1:5672//
+[2025-09-11 21:24:16,770: WARNING/MainProcess] /home/sohan/whatsapp-campaign/venv/lib/python3.10/site-packages/celery/worker/consumer/consumer.py:507: CPendingDeprecationWarning: The broker_connection_retry configuration setting will no longer determine
+whether broker connection retries are made during startup in Celery 6.0 and above.
+If you wish to retain the existing behavior for retrying connections on startup,
+you should set broker_connection_retry_on_startup to True.
+  warnings.warn(
+
+[2025-09-11 21:24:16,772: INFO/MainProcess] mingle: searching for neighbors
+[2025-09-11 21:24:17,905: INFO/MainProcess] mingle: all alone
+[2025-09-11 21:24:17,972: WARNING/MainProcess] /home/sohan/whatsapp-campaign/venv/lib/python3.10/site-packages/kombu/pidbox.py:72: UserWarning: A node named celery@sohan-ThinkPad-E490 is already using this process mailbox!
+
+Maybe you forgot to shutdown the other node or did not do so properly?
+Or if you meant to start multiple nodes on the same host please make sure
+you give each node a unique node name!
+
+  warnings.warn(W_PIDBOX_IN_USE.format(node=self))
+
+[2025-09-11 21:24:17,977: INFO/MainProcess] celery@sohan-ThinkPad-E490 ready.
+[2025-09-11 21:28:24,359: INFO/MainProcess] Task campaigns.tasks.start_campaign_task[03c4c9ab-f061-4ae3-b4bf-1da39a7166cb] received
+[2025-09-11 21:28:24,655: INFO/MainProcess] Task campaigns.tasks.send_whatsapp_message[3ad15779-0b98-4786-90c8-d731831b04b8] received
+[2025-09-11 21:28:24,824: INFO/ForkPoolWorker-7] Task campaigns.tasks.start_campaign_task[03c4c9ab-f061-4ae3-b4bf-1da39a7166cb] succeeded in 0.4646693020040402s: {'campaign_id': 9, 'messages_scheduled': 2}
+[2025-09-11 21:28:27,835: WARNING/ForkPoolWorker-7] {'messaging_product': 'whatsapp', 'recipient_type': 'individual', 'to': '919538095601', 'type': 'template', 'template': {'name': 'sample_template_txt', 'language': {'code': 'en'}}}
+[2025-09-11 21:28:29,326: WARNING/ForkPoolWorker-7] send_whatsapp_message result:
+[2025-09-11 21:28:29,327: WARNING/ForkPoolWorker-7]  
+[2025-09-11 21:28:29,327: WARNING/ForkPoolWorker-7] {'success': True, 'message_id': 'wamid.HBgMOTE5NTM4MDk1NjAxFQIAERgSM0MzNkFEODVFMDBFQkNBODQ0AA==', 'response': {'messaging_product': 'whatsapp', 'contacts': [{'input': '919538095601', 'wa_id': '919538095601'}], 'messages': [{'id': 'wamid.HBgMOTE5NTM4MDk1NjAxFQIAERgSM0MzNkFEODVFMDBFQkNBODQ0AA==', 'message_status': 'accepted'}]}}
+[2025-09-11 21:28:29,612: INFO/MainProcess] Task campaigns.tasks.check_campaign_completion[9ad586c1-fdeb-4a56-896e-e794618b1e8e] received
+[2025-09-11 21:28:29,806: INFO/ForkPoolWorker-7] Task campaigns.tasks.send_whatsapp_message[3ad15779-0b98-4786-90c8-d731831b04b8] succeeded in 3.1513401580014033s: None
+[2025-09-11 21:28:30,153: INFO/ForkPoolWorker-8] Task campaigns.tasks.check_campaign_completion[9ad586c1-fdeb-4a56-896e-e794618b1e8e] succeeded in 0.5383909239972127s: None
+[2025-09-11 21:28:31,551: INFO/MainProcess] Task campaigns.tasks.process_webhook_status[a0d2edeb-defc-4839-bdb0-dfb8a94108a6] received
+[2025-09-11 21:28:32,612: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_webhook_status[a0d2edeb-defc-4839-bdb0-dfb8a94108a6] succeeded in 1.059387469002104s: {'webhook_id': 50, 'success': True}
+[2025-09-11 21:30:00,116: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[57829e94-f99a-4ea8-bb5c-4205182e9ed8] received
+[2025-09-11 21:30:00,654: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[57829e94-f99a-4ea8-bb5c-4205182e9ed8] succeeded in 0.536508038007014s: {'campaigns_checked': 0}
+[2025-09-11 21:39:45,452: INFO/MainProcess] Task campaigns.tasks.process_webhook_status[31dad595-836a-4f8e-883d-a3c982148e1c] received
+[2025-09-11 21:39:45,865: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_webhook_status[31dad595-836a-4f8e-883d-a3c982148e1c] succeeded in 0.4103242740020505s: {'webhook_id': 51, 'success': True}
+[2025-09-11 21:45:00,110: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[f750e07d-b5ce-4849-a757-922a90a0140e] received
+[2025-09-11 21:45:00,326: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[f750e07d-b5ce-4849-a757-922a90a0140e] succeeded in 0.2150639279934694s: {'campaigns_checked': 0}
+[2025-09-11 21:55:00,103: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[0c558c01-42b8-4ff5-9f3f-781208844233] received
+[2025-09-11 21:55:00,749: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[0c558c01-42b8-4ff5-9f3f-781208844233] succeeded in 0.6459995839977637s: {'campaigns_checked': 0}
+[2025-09-11 22:05:00,109: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[f91d2da5-6385-4a2b-baf2-ec4e11b9a446] received
+[2025-09-11 22:05:00,436: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[f91d2da5-6385-4a2b-baf2-ec4e11b9a446] succeeded in 0.3252693440008443s: {'campaigns_checked': 0}
+[2025-09-11 22:11:17,363: INFO/MainProcess] Task campaigns.tasks.process_uploaded_file[052a05fe-d452-4dc6-99f9-31c3df199161] received
+[2025-09-11 22:11:17,555: WARNING/ForkPoolWorker-7] DEBUG: Processing file 13
+[2025-09-11 22:11:18,892: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_uploaded_file[052a05fe-d452-4dc6-99f9-31c3df199161] succeeded in 1.5259547910027322s: {'file_id': 13, 'valid_rows': 2, 'invalid_rows': 0}
+[2025-09-11 22:15:52,327: INFO/MainProcess] Task campaigns.tasks.process_uploaded_file[0da637c4-7ccf-4ba1-bcc0-7dc36f77e677] received
+[2025-09-11 22:15:52,464: WARNING/ForkPoolWorker-7] DEBUG: Processing file 14
+[2025-09-11 22:15:53,709: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_uploaded_file[0da637c4-7ccf-4ba1-bcc0-7dc36f77e677] succeeded in 1.380952633000561s: {'file_id': 14, 'valid_rows': 2, 'invalid_rows': 0}
+[2025-09-11 22:22:11,666: INFO/MainProcess] Task campaigns.tasks.process_uploaded_file[3f075c31-b4d2-413e-b742-c6d79bd9d154] received
+[2025-09-11 22:22:11,779: WARNING/ForkPoolWorker-7] DEBUG: Processing file 15
+[2025-09-11 22:22:12,910: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_uploaded_file[3f075c31-b4d2-413e-b742-c6d79bd9d154] succeeded in 1.2417701310041593s: {'file_id': 15, 'valid_rows': 2, 'invalid_rows': 0}
+[2025-09-11 22:28:14,632: INFO/MainProcess] Task campaigns.tasks.process_uploaded_file[8d536a5d-ff2a-4e43-b8cc-0c8933553548] received
+[2025-09-11 22:28:14,779: WARNING/ForkPoolWorker-7] DEBUG: Processing file 16
+[2025-09-11 22:28:15,364: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_uploaded_file[8d536a5d-ff2a-4e43-b8cc-0c8933553548] succeeded in 0.7302398430038011s: {'file_id': 16, 'valid_rows': 2, 'invalid_rows': 0}
+[2025-09-11 22:28:45,796: INFO/MainProcess] Task campaigns.tasks.send_whatsapp_message[83d8ad9d-7973-4967-8957-da92be9d7d6f] received
+[2025-09-11 22:28:47,197: WARNING/ForkPoolWorker-7] {'messaging_product': 'whatsapp', 'recipient_type': 'individual', 'to': '917702828811', 'type': 'template', 'template': {'name': 'sample_template_txt', 'language': {'code': 'en'}}}
+[2025-09-11 22:28:48,850: WARNING/ForkPoolWorker-7] send_whatsapp_message result:
+[2025-09-11 22:28:48,850: WARNING/ForkPoolWorker-7]  
+[2025-09-11 22:28:48,851: WARNING/ForkPoolWorker-7] {'success': True, 'message_id': 'wamid.HBgMOTE3NzAyODI4ODExFQIAERgSMDlERTNCNDA3NTk5NzBEMjUwAA==', 'response': {'messaging_product': 'whatsapp', 'contacts': [{'input': '917702828811', 'wa_id': '917702828811'}], 'messages': [{'id': 'wamid.HBgMOTE3NzAyODI4ODExFQIAERgSMDlERTNCNDA3NTk5NzBEMjUwAA==', 'message_status': 'accepted'}]}}
+[2025-09-11 22:28:49,251: INFO/MainProcess] Task campaigns.tasks.check_campaign_completion[aa5de41e-923e-471d-b20a-b838d05051f1] received
+[2025-09-11 22:28:49,373: INFO/ForkPoolWorker-7] Task campaigns.tasks.send_whatsapp_message[83d8ad9d-7973-4967-8957-da92be9d7d6f] succeeded in 3.5756809470040025s: None
+[2025-09-11 22:28:49,637: INFO/ForkPoolWorker-8] Task campaigns.tasks.check_campaign_completion[aa5de41e-923e-471d-b20a-b838d05051f1] succeeded in 0.38244518100691494s: None
+[2025-09-11 22:28:50,333: INFO/MainProcess] Task campaigns.tasks.process_webhook_status[05de9e6c-5f8c-4b61-a527-11696b2453c0] received
+[2025-09-11 22:28:51,136: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_webhook_status[05de9e6c-5f8c-4b61-a527-11696b2453c0] succeeded in 0.8016085600102087s: {'webhook_id': 52, 'success': True}
+[2025-09-11 22:28:52,333: INFO/MainProcess] Task campaigns.tasks.process_webhook_status[25176d2c-8bbf-4740-91e0-6e78833e51aa] received
+[2025-09-11 22:28:53,343: INFO/ForkPoolWorker-7] Task campaigns.tasks.process_webhook_status[25176d2c-8bbf-4740-91e0-6e78833e51aa] succeeded in 1.0090033219894394s: {'webhook_id': 53, 'success': True}
+[2025-09-11 22:30:00,114: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[cc632299-3ec6-4985-86bf-9165570ac275] received
+[2025-09-11 22:30:00,419: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[cc632299-3ec6-4985-86bf-9165570ac275] succeeded in 0.3040628570015542s: {'campaigns_checked': 1}
+[2025-09-11 22:35:00,108: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[c9a3d901-753c-4cba-af95-8f5d8165827b] received
+[2025-09-11 22:35:00,419: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[c9a3d901-753c-4cba-af95-8f5d8165827b] succeeded in 0.30882211099378765s: {'campaigns_checked': 1}
+[2025-09-11 22:40:00,205: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[be1269a6-dd1d-47b3-8608-ad60c847a017] received
+[2025-09-11 22:40:01,679: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[be1269a6-dd1d-47b3-8608-ad60c847a017] succeeded in 1.4722585039999103s: {'campaigns_checked': 1}
+[2025-09-11 22:45:00,111: INFO/MainProcess] Task campaigns.tasks.check_all_running_campaigns[b102bb72-99f9-4fe2-86b8-74961961dda2] received
+[2025-09-11 22:45:00,416: INFO/ForkPoolWorker-7] Task campaigns.tasks.check_all_running_campaigns[b102bb72-99f9-4fe2-86b8-74961961dda2] succeeded in 0.30280063599639107s: {'campaigns_checked': 1}

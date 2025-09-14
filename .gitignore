@@ -12,3 +12,10 @@ whatsapp_campaign_streamlit/pages/__pycache__/
 whatsapp_campaign_streamlit/venv-frontend/
 whatsapp_campaign_streamlit/.streamlit/
 media/
+
+
+orders/migrations/
+orders/__pycache__/
+orders/media/
+orders_streamlit/venv-ordersui/
+orders_streamlit/.streamlit/

@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     # Local apps
     'authentication',
     'campaigns',
+    'orders',
 ]
 
 MIDDLEWARE = [
@@ -142,6 +143,15 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# Orders app media configuration
+ORDERS_MEDIA_ROOT = os.path.join(BASE_DIR, 'orders', 'media')
+ORDERS_MEDIA_URL = '/orders/media/'
+
+# Ensure directories exist
+os.makedirs(os.path.join(ORDERS_MEDIA_ROOT, 'chatfile'), exist_ok=True)
+os.makedirs(os.path.join(ORDERS_MEDIA_ROOT, 'processedchatfile'), exist_ok=True)
+os.makedirs(os.path.join(ORDERS_MEDIA_ROOT, 'validatedchatfile'), exist_ok=True)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -204,6 +214,9 @@ WHATSAPP_CONFIG = {
     'API_URL': config('WHATSAPP_360_API_URL', default='https://waba-v2.360dialog.io'),
     'WEBHOOK_URL': config('WHATSAPP_360_WEBHOOK_URL', default=''),
 }
+
+# Groq AI Configuration for Orders App
+GROQ_API_KEY = config('GROQ_API_KEY', default='')
 
 
 # Rate Limiting

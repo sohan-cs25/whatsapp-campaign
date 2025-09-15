@@ -5,10 +5,13 @@ Integrates chat processing tools with Django models
 
 import os
 import pandas as pd
+import logging
 from typing import List, Dict, Optional
 from django.conf import settings
 from .tools.chat_parser import parse_chat_content, get_chat_statistics
 from .models import ChatFile, ParsedChatFile, ValidatedFile, Order
+
+logger = logging.getLogger(__name__)
 
 
 def process_chat_file_content(chat_file: ChatFile) -> Dict:
@@ -312,6 +315,89 @@ def extract_orders_from_validated_file(validated_file: ValidatedFile) -> List[Or
         return created_orders
 
     except Exception as e:
+        raise Exception(f"Failed to extract orders: {str(e)}")
+
+
+def extract_orders_from_validated_file_sync(validated_file: ValidatedFile) -> List[Order]:
+    """
+    Synchronous version to extract Order instances from ValidatedFile
+    Supports new format: order_items="Apples:1,Pears:2", amount="150+200=350"
+
+    Args:
+        validated_file: ValidatedFile instance
+
+    Returns:
+        List of created Order instances
+    """
+    try:
+        logger.info(f"Starting sync extraction from {validated_file.file_name}")
+
+        # Read the validated file
+        file_path = validated_file.filepath.path
+
+        # Determine file type and read accordingly
+        if validated_file.filetype == 'csv':
+            df = pd.read_csv(file_path)
+        else:  # xlsx
+            df = pd.read_excel(file_path)
+
+        logger.info(f"Read {len(df)} rows from {validated_file.file_name}")
+
+        # Expected columns matching the processed file format
+        required_columns = ['Phone/Name', 'Items', 'Total_Amount']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+
+        if missing_columns:
+            raise Exception(f"Missing required columns: {missing_columns}. Found: {list(df.columns)}")
+
+        created_orders = []
+
+        for index, row in df.iterrows():
+            try:
+                # Extract and validate data using processed file column names
+                phone_number = str(row.get('Phone/Name', '')).strip()
+                order_items_str = str(row.get('Items', '')).strip()
+                amount_str = str(row.get('Total_Amount', '')).strip()
+
+                logger.info(f"🔍 Extracting Row {index + 1}:")
+                logger.info(f"   Raw Phone/Name: '{row.get('Phone/Name')}' (type: {type(row.get('Phone/Name'))})")
+                logger.info(f"   Raw Items: '{row.get('Items')}' (type: {type(row.get('Items'))})")
+                logger.info(f"   Raw Total_Amount: '{row.get('Total_Amount')}' (type: {type(row.get('Total_Amount'))})")
+                logger.info(f"   Processed phone_number: '{phone_number}'")
+                logger.info(f"   Processed order_items_str: '{order_items_str}'")
+                logger.info(f"   Processed amount_str: '{amount_str}'")
+
+                # Skip rows with missing essential data
+                if not phone_number or not order_items_str or not amount_str:
+                    logger.warning(f"Skipping row {index + 1}: missing data")
+                    continue
+
+                # Validate phone number format (should be normalized already)
+                if not phone_number.isdigit() or len(phone_number) < 10:
+                    logger.warning(f"Skipping row {index + 1}: invalid phone number format: {phone_number}")
+                    continue
+
+                # Create Order instance - order_id will be auto-generated
+                order = Order.objects.create(
+                    validated_file=validated_file,
+                    number=phone_number,
+                    order_items=order_items_str,  # Store as string: "Apples:1,Pears:2"
+                    amount=amount_str,  # Store as string: "150+200=350"
+                    status='pending'
+                )
+
+                created_orders.append(order)
+                logger.debug(f"Created order {order.order_id} for {phone_number}")
+
+            except Exception as e:
+                logger.error(f"Error processing row {index + 1}: {str(e)}")
+                continue
+
+        logger.info(f"Successfully created {len(created_orders)} orders from {validated_file.file_name}")
+        return created_orders
+
+    except Exception as e:
+        logger.error(f"Failed to extract orders from {validated_file.file_name}: {str(e)}")
         raise Exception(f"Failed to extract orders: {str(e)}")
 
 

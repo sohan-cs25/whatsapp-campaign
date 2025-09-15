@@ -19,3 +19,8 @@ orders/__pycache__/
 orders/media/
 orders_streamlit/venv-ordersui/
 orders_streamlit/.streamlit/
+
+__pycache__/
+orders/tools/__pycache__/
+orders/API_FEATURES_SUMMARY.md
+orders_streamlit/UI_IMPROVEMENTS_SUMMARY.md

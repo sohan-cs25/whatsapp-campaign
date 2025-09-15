@@ -261,7 +261,8 @@ def show_dashboard_page():
         "📄 Extract Orders",
         "📂 Manage Files",
         "📤 Send Order Messages",
-        "💰 Payment Tracking"
+        "💰 Payment Tracking",
+        "📈 Analytics"
     ]
     selected_page = st.sidebar.radio("Navigate to:", page_options)
 
@@ -282,6 +283,8 @@ def show_dashboard_page():
         show_send_messages_page()
     elif selected_page == "💰 Payment Tracking":
         show_payment_tracking_page()
+    elif selected_page == "📈 Analytics":
+        show_analytics_page()
 
 def show_dashboard_content():
     """Display dashboard metrics"""
@@ -414,12 +417,12 @@ def show_extract_orders_page():
                         # Simulate processing progress (since we don't have streaming yet)
                         status_text.info("🔄 Processing started... This may take several minutes due to AI rate limits.")
 
-                        # Poll for completion
-                        max_polls = 120  # 10 minutes max
+                        # Poll for completion with longer intervals due to AI rate limits
+                        max_polls = 60  # 15 minutes max (60 * 15 seconds)
                         poll_count = 0
 
                         while poll_count < max_polls:
-                            time.sleep(5)  # Poll every 5 seconds
+                            time.sleep(15)  # Poll every 15 seconds (reduced API load)
                             poll_count += 1
 
                             # Check if processing is complete
@@ -428,8 +431,8 @@ def show_extract_orders_page():
                             if status_response and status_response.status_code == 200:
                                 status_data = status_response.json()
 
-                                # Update progress
-                                progress = min(poll_count / max_polls, 0.95)
+                                # Update progress more conservatively
+                                progress = min(poll_count / max_polls, 0.90)
                                 progress_bar.progress(progress)
                                 progress_metric.metric("Progress", f"{int(progress * 100)}%")
 
@@ -442,7 +445,15 @@ def show_extract_orders_page():
                                     processed_response = make_api_request(f"{API_ENDPOINTS['orders']['processed_files']}")
                                     if processed_response and processed_response.status_code == 200:
                                         processed_files = processed_response.json().get('results', [])
-                                        latest_file = next((f for f in processed_files if f['chatfile'] == chat_file_id), None)
+                                        latest_file = None
+
+                                        # Safely search for matching processed file
+                                        if processed_files:
+                                            try:
+                                                latest_file = next((f for f in processed_files if f.get('chatfile') == chat_file_id), None)
+                                            except (KeyError, TypeError) as e:
+                                                st.error(f"Error finding processed file: {e}")
+                                                latest_file = None
 
                                         if latest_file:
                                             st.markdown("---")
@@ -588,13 +599,35 @@ def show_manage_files_page():
                 )
 
                 if response and response.status_code == 201:
+                    upload_data = response.json()
                     st.success("✅ Validated file uploaded successfully!")
+
+                    # Show next steps
+                    st.info("🎯 **Next Steps:**")
+                    st.write("1. 📤 Go to **Send Order Messages** page")
+                    st.write("2. 🔍 Select this file to extract orders")
+                    st.write("3. 📲 Send WhatsApp messages to customers")
+
+                    # Show file details
+                    with st.expander("📄 File Details"):
+                        st.write(f"**File Name:** {upload_data.get('data', {}).get('file_name', 'Unknown')}")
+                        st.write(f"**Upload Time:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        st.write("**Status:** Ready for order extraction")
+
+                    time.sleep(2)  # Brief pause to read
                     st.rerun()
                 else:
-                    st.error("❌ Failed to upload validated file")
+                    error_msg = "Failed to upload validated file"
+                    if response:
+                        try:
+                            error_data = response.json()
+                            error_msg = error_data.get('error', error_msg)
+                        except:
+                            pass
+                    st.error(f"❌ {error_msg}")
 
 def show_send_messages_page():
-    """Send order confirmation messages"""
+    """Send order confirmation messages with file-specific tracking"""
     st.title("📤 Send Order Messages")
     st.markdown("Send WhatsApp order confirmation messages with payment links.")
 
@@ -616,20 +649,66 @@ def show_send_messages_page():
             if selected_file:
                 file_id = file_options[selected_file]
 
+                # Store selected file in session state for persistence
+                st.session_state.selected_file_id = file_id
+
+                # Get file-specific orders and statistics
+                orders_response = make_api_request(f"orders/?validated_file={file_id}")
+
+                if orders_response and orders_response.status_code == 200:
+                    orders_data = orders_response.json()
+                    orders = orders_data.get('results', [])
+                    file_stats = orders_data.get('file_stats', {})
+
+                    # Show file-specific statistics
+                    if file_stats:
+                        st.subheader(f"📊 {file_stats['file_name']} - Status Overview")
+
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("📝 Total Orders", file_stats.get('total_orders', 0))
+                        with col2:
+                            st.metric("📤 Sent", file_stats.get('sent', 0),
+                                    delta=f"{file_stats.get('delivered', 0)} delivered")
+                        with col3:
+                            st.metric("👁️ Read", file_stats.get('read', 0))
+                        with col4:
+                            st.metric("💰 Paid", file_stats.get('payment_completed', 0))
+
+                        # Add refresh button
+                        col_refresh, col_export = st.columns([1, 1])
+                        with col_refresh:
+                            if st.button("🔄 Refresh Status", help="Get latest status updates"):
+                                st.rerun()
+                        with col_export:
+                            # Export buttons
+                            export_option = st.selectbox("📥 Export", ["Choose format...", "CSV", "Excel"])
+                            if export_option != "Choose format...":
+                                if export_option == "CSV":
+                                    export_url = f"{API_BASE_URL}/orders/orders/export_csv/?validated_file={file_id}"
+                                    st.markdown(f"[📥 Download CSV]({export_url})")
+                                else:
+                                    export_url = f"{API_BASE_URL}/orders/orders/export_excel/?validated_file={file_id}"
+                                    st.markdown(f"[📥 Download Excel]({export_url})")
+
+                # Message sending section
                 col1, col2 = st.columns(2)
 
                 with col1:
                     template_name = st.text_input(
                         "WhatsApp Template Name",
-                        value="order_confirmation",
+                        value="sample_order_details",
                         help="Approved WhatsApp Business template name"
                     )
 
                 with col2:
-                    test_mode = st.checkbox(
-                        "Test Mode",
-                        help="Send to test numbers only",
-                        value=True
+                    delay_seconds = st.slider(
+                        "Delay between messages (seconds)",
+                        min_value=1.0,
+                        max_value=10.0,
+                        value=2.0,
+                        step=0.5,
+                        help="Time delay between sending messages"
                     )
 
                 if st.button("📤 Send Order Messages", type="primary", use_container_width=True):
@@ -640,39 +719,125 @@ def show_send_messages_page():
                     )
 
                     if extract_response and extract_response.status_code == 200:
-                        st.success("✅ Order extraction started!")
+                        extract_data = extract_response.json()
+                        orders_extracted = extract_data.get('orders_extracted', 0)
 
-                        # TODO: Implement actual message sending via WhatsApp API
-                        # This would integrate with the existing campaigns WhatsApp client
+                        st.success(f"✅ Extracted {orders_extracted} orders successfully!")
 
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
+                        if orders_extracted > 0:
+                            # Show time estimation
+                            estimated_time = orders_extracted * 2  # 2 seconds per message
+                            st.info(f"⏱️ Estimated sending time: ~{estimated_time} seconds ({estimated_time//60}m {estimated_time%60}s)")
 
-                        # Simulate sending progress
-                        for i in range(100):
-                            time.sleep(0.1)
-                            progress_bar.progress((i + 1) / 100)
-                            status_text.text(f"Sending messages... {i + 1}%")
+                            # Send messages using new synchronous endpoint
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
 
-                        st.success("✅ Order confirmation messages sent!")
+                            status_text.text("📤 Sending WhatsApp messages (2-second delay between messages)...")
+
+                            # Call the new send messages endpoint
+                            send_response = make_api_request(
+                                f"{API_ENDPOINTS['orders']['send_messages']}",
+                                method="POST",
+                                data={'validated_file_id': file_id}
+                            )
+
+                            progress_bar.progress(1.0)
+
+                            if send_response and send_response.status_code == 200:
+                                send_data = send_response.json()
+
+                                st.success("✅ Messages sent successfully!")
+
+                                # Show summary
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("📤 Total Orders", send_data.get('total_orders', 0))
+                                with col2:
+                                    st.metric("✅ Sent", send_data.get('sent_count', 0))
+                                with col3:
+                                    st.metric("❌ Failed", send_data.get('failed_count', 0))
+
+                                st.info(f"⏱️ Total time: {send_data.get('total_time_seconds', 0)} seconds")
+
+                                # Show detailed results
+                                if send_data.get('results'):
+                                    st.subheader("📋 Detailed Results")
+
+                                    results_df = pd.DataFrame(send_data['results'])
+
+                                    # Format the display
+                                    display_df = results_df[['order_id', 'number', 'status']].copy()
+                                    display_df.columns = ['Order ID', 'Phone Number', 'Status']
+
+                                    # Add status icons
+                                    display_df['Status'] = display_df['Status'].apply(
+                                        lambda x: f"✅ {x}" if x == 'sent' else f"❌ {x}"
+                                    )
+
+                                    st.dataframe(display_df, use_container_width=True)
+
+                            else:
+                                error_msg = "Failed to send messages"
+                                if send_response:
+                                    error_data = send_response.json()
+                                    error_msg = error_data.get('error', error_msg)
+                                st.error(f"❌ {error_msg}")
+                        else:
+                            st.warning("⚠️ No orders found to send messages for")
 
                     else:
-                        st.error("❌ Failed to extract orders from validated file")
+                        error_msg = "Failed to extract orders from validated file"
+                        if extract_response:
+                            error_data = extract_response.json()
+                            error_msg = error_data.get('error', error_msg)
+                        st.error(f"❌ {error_msg}")
         else:
             st.info("No validated files found. Please validate some orders first.")
     else:
         st.error("Unable to load validated files.")
 
 def show_payment_tracking_page():
-    """Track payment status for orders"""
+    """Track payment status for orders with file-specific filtering"""
     st.title("💰 Payment Tracking")
     st.markdown("Monitor payment status for sent order messages.")
 
-    # Get orders with payment tracking
-    response = make_api_request(API_ENDPOINTS['orders']['orders'])
+    # File selector for filtering
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        # Get validated files for filter
+        validated_files_response = make_api_request(API_ENDPOINTS['orders']['validated_files'])
+        file_filter = "All Files"
+
+        if validated_files_response and validated_files_response.status_code == 200:
+            validated_files = validated_files_response.json().get('results', [])
+            file_options = ["All Files"] + [f['file_name'] for f in validated_files]
+            file_filter = st.selectbox("📁 Filter by file:", file_options)
+
+    with col2:
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            st.rerun()
+
+    # Get orders with optional file filtering
+    endpoint = API_ENDPOINTS['orders']['orders']
+    if file_filter != "All Files":
+        # Find selected file ID
+        selected_file_id = None
+        for f in validated_files:
+            if f['file_name'] == file_filter:
+                selected_file_id = f['id']
+                break
+
+        if selected_file_id:
+            endpoint += f"?validated_file={selected_file_id}"
+
+    response = make_api_request(endpoint)
 
     if response and response.status_code == 200:
-        orders = response.json().get('results', [])
+        orders_data = response.json()
+        orders = orders_data.get('results', [])
+        file_stats = orders_data.get('file_stats', {})
 
         if orders:
             # Summary metrics
@@ -733,6 +898,126 @@ def show_payment_tracking_page():
             st.info("No orders found. Process some files and send messages first.")
     else:
         st.error("Unable to load orders.")
+
+def show_analytics_page():
+    """Comprehensive analytics dashboard"""
+    st.title("📈 Analytics Dashboard")
+    st.markdown("Comprehensive insights into your WhatsApp order campaigns.")
+
+    # Get analytics data
+    response = make_api_request(API_ENDPOINTS['orders']['analytics'])
+
+    if response and response.status_code == 200:
+        analytics = response.json()
+        overview = analytics.get('overview', {})
+        message_stats = analytics.get('message_stats', {})
+        payment_stats = analytics.get('payment_stats', {})
+        file_breakdown = analytics.get('file_breakdown', [])
+        recent_activity = analytics.get('recent_activity', [])
+
+        # Overview section
+        st.subheader("🎯 Performance Overview")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric(
+                "📊 Total Orders",
+                overview.get('total_orders', 0),
+                delta=f"{overview.get('total_files', 0)} files"
+            )
+
+        with col2:
+            success_rate = overview.get('message_success_rate', 0)
+            st.metric(
+                "✅ Success Rate",
+                f"{success_rate:.1f}%",
+                delta=f"Read: {overview.get('read_rate', 0):.1f}%"
+            )
+
+        with col3:
+            conversion_rate = overview.get('payment_conversion_rate', 0)
+            st.metric(
+                "💰 Payment Rate",
+                f"{conversion_rate:.1f}%",
+                delta=f"₹{overview.get('total_revenue', 0):,.0f}"
+            )
+
+        with col4:
+            st.metric(
+                "💸 Revenue",
+                f"₹{overview.get('total_revenue', 0):,.0f}",
+                delta="Total earned"
+            )
+
+        st.markdown("---")
+
+        # File-wise breakdown
+        if file_breakdown:
+            st.subheader("📁 File Performance Breakdown")
+
+            # Create dataframe for file breakdown
+            df_files = pd.DataFrame(file_breakdown)
+
+            # Format for display
+            display_df = df_files[[
+                'file_name', 'total_orders', 'sent', 'delivered', 'read',
+                'payment_completed', 'success_rate', 'payment_conversion', 'revenue'
+            ]].copy()
+
+            display_df.columns = [
+                'File Name', 'Orders', 'Sent', 'Delivered', 'Read',
+                'Paid', 'Success %', 'Payment %', 'Revenue (₹)'
+            ]
+
+            # Format percentages and revenue
+            display_df['Success %'] = display_df['Success %'].round(1)
+            display_df['Payment %'] = display_df['Payment %'].round(1)
+            display_df['Revenue (₹)'] = display_df['Revenue (₹)'].round(0)
+
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # Message & Payment Stats
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("📤 Message Status")
+            if message_stats:
+                # Create a simple bar chart with metrics
+                st.metric("✅ Sent", message_stats.get('sent', 0))
+                st.metric("📨 Delivered", message_stats.get('delivered', 0))
+                st.metric("👁️ Read", message_stats.get('read', 0))
+                st.metric("❌ Failed", message_stats.get('failed', 0))
+
+        with col2:
+            st.subheader("💰 Payment Status")
+            if payment_stats:
+                st.metric("✅ Completed", payment_stats.get('completed', 0))
+                st.metric("⏳ Pending", payment_stats.get('pending', 0))
+                st.metric("🚀 Initiated", payment_stats.get('initiated', 0))
+                st.metric("❌ Failed", payment_stats.get('failed', 0))
+
+        # Recent activity
+        if recent_activity:
+            st.markdown("---")
+            st.subheader("🕐 Recent Activity")
+
+            activity_df = pd.DataFrame(recent_activity)
+            display_activity = activity_df[['order_id', 'phone', 'status', 'payment_status', 'file_name']].copy()
+            display_activity.columns = ['Order ID', 'Phone', 'Message', 'Payment', 'File']
+
+            st.dataframe(display_activity, use_container_width=True, hide_index=True)
+
+        # Refresh button
+        if st.button("🔄 Refresh Analytics", use_container_width=True):
+            st.rerun()
+
+    else:
+        st.error("Unable to load analytics data. Please ensure the backend is running.")
+
+        # Fallback display
+        st.info("📊 Analytics will be available once you start processing orders.")
 
 # Main Application
 def main():

@@ -32,7 +32,6 @@ def process_chat_file(self, chat_file_id):
     Returns:
         Dictionary with processing results
     """
-    import asyncio
     from .ai_service import django_ai_service
     from .tools.chat_parser import parse_chat_content
 
@@ -62,20 +61,11 @@ def process_chat_file(self, chat_file_id):
         # Step 2: AI Classification with rate limiting
         logger.info("Step 2: AI classification (this may take time due to rate limits)...")
 
-        async def run_ai_processing():
-            processed_messages, stats = await django_ai_service.process_chat_messages(
-                messages=messages,
-                chat_file_id=str(chat_file.id)
-            )
-            return processed_messages, stats
-
-        # Run async AI processing
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            processed_messages, stats = loop.run_until_complete(run_ai_processing())
-        finally:
-            loop.close()
+        # Use the new synchronous wrapper that handles async/sync compatibility
+        processed_messages, stats = django_ai_service.process_chat_messages_sync(
+            messages=messages,
+            chat_file_id=str(chat_file.id)
+        )
 
         logger.info(f"AI classification completed. Found {stats.orders_found} orders")
 

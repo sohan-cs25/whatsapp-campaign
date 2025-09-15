@@ -116,7 +116,65 @@ class WhatsApp360Client:
                 'error': str(e),
                 'status_code': 500
             }
-    
+
+    def send_message(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send a WhatsApp message with custom payload (for order_details template)
+
+        Args:
+            payload: Complete WhatsApp API payload
+
+        Returns:
+            dict: API response containing message ID and status
+        """
+        try:
+            logger.info(f"Sending WhatsApp message to {payload.get('to')}")
+
+            response = self.session.post(
+                f"{self.api_url}/messages",
+                json=payload,
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"Message sent successfully: {result}")
+                return {
+                    'success': True,
+                    'message_id': result.get('messages', [{}])[0].get('id'),
+                    'response': result,
+                    'status_code': 200
+                }
+            else:
+                logger.error(f"Failed to send message: {response.status_code} - {response.text}")
+                return {
+                    'success': False,
+                    'error': response.text,
+                    'status_code': response.status_code
+                }
+
+        except requests.exceptions.Timeout:
+            logger.error("Request timeout while sending message")
+            return {
+                'success': False,
+                'error': 'Request timeout',
+                'status_code': 408
+            }
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'status_code': 500
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'status_code': 500
+            }
+
     def build_template_components(
         self,
         header_params: Optional[List] = None,

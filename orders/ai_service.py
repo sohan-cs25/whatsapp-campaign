@@ -17,6 +17,8 @@ from django.db import transaction
 from asgiref.sync import sync_to_async
 
 import instructor
+import threading
+import concurrent.futures
 from groq import Groq
 
 from .schemas import MessageClassification, OrderDetails, MessageType, ProcessingStats
@@ -336,6 +338,29 @@ Examples:
             total_queries=stats.message_types.get('enquiry', 0)
         )
         return parsed_file
+
+    def process_chat_messages_sync(self, messages: List[Dict], chat_file_id: str, progress_callback=None) -> Tuple[List[Dict], ProcessingStats]:
+        """
+        Synchronous wrapper for process_chat_messages that works reliably with Celery
+
+        This method uses a separate thread with its own event loop to avoid
+        conflicts with existing asyncio contexts in Celery workers.
+        """
+        def run_in_thread():
+            # Create a new event loop in this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    self.process_chat_messages(messages, chat_file_id, progress_callback)
+                )
+            finally:
+                loop.close()
+
+        # Run the async function in a separate thread to avoid event loop conflicts
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_thread)
+            return future.result()
 
 
 # Global service instance

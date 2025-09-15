@@ -6,7 +6,9 @@ from .views import (
     ValidatedFileViewSet,
     OrderViewSet,
     processing_stats,
-    process_stream
+    analytics_dashboard,
+    process_stream,
+    send_order_messages
 )
 
 app_name = 'orders'
@@ -24,5 +26,7 @@ urlpatterns = [
 
     # Custom endpoints
     path('stats/', processing_stats, name='processing-stats'),
+    path('analytics/', analytics_dashboard, name='analytics-dashboard'),
     path('process-stream/<uuid:file_id>/', process_stream, name='process-stream'),
+    path('send-messages/', send_order_messages, name='send-order-messages'),
 ]

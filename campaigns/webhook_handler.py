@@ -51,11 +51,11 @@ class WhatsAppWebhookView(View):
             
             logger.info(f"Received webhook: {json.dumps(payload, indent=2)}")
             
-            # Import task here to avoid circular import
-            from .tasks import process_webhook_status
-            
-            # Process the webhook asynchronously
-            process_webhook_status.delay(webhook_log.id)
+            # Import unified router
+            from .tasks import process_unified_webhook_status
+
+            # Process the webhook asynchronously using unified router
+            process_unified_webhook_status.delay(webhook_log.id)
             
             # Return immediate response to 360dialog
             return JsonResponse({'status': 'received'}, status=200)

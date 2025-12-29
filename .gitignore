@@ -24,3 +24,5 @@ __pycache__/
 orders/tools/__pycache__/
 orders/API_FEATURES_SUMMARY.md
 orders_streamlit/UI_IMPROVEMENTS_SUMMARY.md
+
+.env

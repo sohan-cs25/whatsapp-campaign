@@ -156,7 +156,13 @@ class Order(models.Model):
     # Payment Webhook Data
     payment_webhook_data = models.JSONField(default=dict, blank=True, help_text="Complete payment webhook payload")
     payment_captured_at = models.DateTimeField(null=True, blank=True, help_text="When payment was captured")
-    
+
+    # Payment Success Message Tracking
+    payment_success_message_sent = models.BooleanField(default=False, help_text="Whether payment success message was sent")
+    payment_success_message_id = models.CharField(max_length=100, blank=True, help_text="WhatsApp message ID for payment success notification")
+    payment_success_sent_at = models.DateTimeField(null=True, blank=True, help_text="When payment success message was sent")
+    payment_success_message_status = models.CharField(max_length=20, blank=True, help_text="Status of payment success message (sent, delivered, read, failed)")
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

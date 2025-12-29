@@ -342,3 +342,96 @@ class OrderWhatsAppService:
         logger.info(f"📊 Bulk send complete: {results['sent_count']} sent, {results['failed_count']} failed in {results['total_time_seconds']}s")
 
         return results
+
+    def send_payment_success_message(self, order, payment_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send payment success confirmation message using template
+
+        Args:
+            order: Order model instance
+            payment_data: Payment webhook data containing amount, method, transaction details
+
+        Returns:
+            Dict containing the API response
+        """
+        try:
+            logger.info(f"Sending payment success message for order {order.order_id} to {order.number}")
+
+            # Extract payment data from webhook
+            amount_value = payment_data.get('amount', {}).get('value', 0)
+            amount_offset = payment_data.get('amount', {}).get('offset', 100)
+            actual_amount = amount_value / amount_offset if amount_offset else 0  # 200/100 = 2.00
+
+            payment_method = payment_data.get('transaction', {}).get('method', {}).get('type', 'Unknown')
+            payment_method_display = payment_method.upper() if payment_method else 'Unknown'
+
+            transaction_id = payment_data.get('transaction', {}).get('pg_transaction_id', 'N/A')
+            reference_id = payment_data.get('reference_id', order.order_id)
+
+            # Build template message payload
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": order.number,
+                "type": "template",
+                "template": {
+                    "name": "payment_success_confirmation",
+                    "language": {
+                        "policy": "deterministic",
+                        "code": "en"
+                    },
+                    "components": [
+                        {
+                            "type": "body",
+                            "parameters": [
+                                {
+                                    "type": "text",
+                                    "text": reference_id  # {{1}} - Order/Reference ID
+                                },
+                                {
+                                    "type": "text",
+                                    "text": f"{actual_amount:.2f}"  # {{2}} - Amount in rupees
+                                },
+                                {
+                                    "type": "text",
+                                    "text": payment_method_display  # {{3}} - Payment method
+                                },
+                                {
+                                    "type": "text",
+                                    "text": transaction_id  # {{4}} - Transaction ID
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+
+            logger.info(f"Payment success template variables: Order={reference_id}, Amount=₹{actual_amount:.2f}, Method={payment_method_display}, TxnID={transaction_id}")
+
+            # Send via WhatsApp client
+            response = self.client.send_message(payload)
+
+            # Update order payment success tracking
+            if response and response.get('success', False):
+                order.payment_success_message_sent = True
+                order.payment_success_sent_at = timezone.now()
+                order.payment_success_message_id = response.get('message_id', '')
+                order.payment_success_message_status = 'sent'
+                logger.info(f"✅ Payment success message for order {order.order_id} sent successfully")
+            else:
+                order.payment_success_message_sent = False
+                order.payment_success_message_status = 'failed'
+                logger.warning(f"❌ Payment success message for order {order.order_id} failed: {response}")
+
+            order.save()
+            return response or {'success': False, 'error': 'No response'}
+
+        except Exception as e:
+            logger.error(f"❌ Error sending payment success message for order {order.order_id}: {str(e)}")
+
+            # Update order status to failed
+            order.payment_success_message_sent = False
+            order.payment_success_message_status = 'failed'
+            order.save()
+
+            raise e

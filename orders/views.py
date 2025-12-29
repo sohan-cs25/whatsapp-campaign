@@ -858,3 +858,102 @@ def send_order_messages(request):
         return Response({
             'error': f'Failed to send messages: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def resend_payment_success_message(request, order_id):
+    """
+    Resend payment success message for a specific order
+
+    Expected payload: {} (empty - order_id from URL)
+
+    Returns:
+    {
+        "success": true,
+        "message": "Payment success message resent",
+        "order_id": "2025091500007",
+        "message_id": "wamid_xyz"
+    }
+    """
+    try:
+        # Get order and verify ownership
+        try:
+            order = Order.objects.get(
+                id=order_id,
+                validated_file__user=request.user
+            )
+        except Order.DoesNotExist:
+            return Response({
+                'error': 'Order not found or access denied'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if payment is completed
+        if order.payment_status != 'completed':
+            return Response({
+                'error': f'Cannot send payment success message - payment status is {order.payment_status}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        logger.info(f"Manually resending payment success message for order {order.order_id}")
+
+        # Initialize WhatsApp service
+        from .whatsapp_service import OrderWhatsAppService
+        whatsapp_service = OrderWhatsAppService()
+
+        # Create payment data from stored webhook data or order fields
+        payment_data = {}
+        if order.payment_webhook_data:
+            # Extract from stored webhook data
+            try:
+                statuses = []
+                if 'entry' in order.payment_webhook_data:
+                    for entry in order.payment_webhook_data.get('entry', []):
+                        for change in entry.get('changes', []):
+                            value = change.get('value', {})
+                            if 'statuses' in value:
+                                statuses.extend(value['statuses'])
+
+                for status_data in statuses:
+                    if status_data.get('type') == 'payment':
+                        payment_data = status_data.get('payment', {})
+                        break
+            except Exception as e:
+                logger.warning(f"Could not extract payment data from webhook: {e}")
+
+        # Fallback payment data from order fields
+        if not payment_data:
+            payment_data = {
+                'reference_id': order.order_id,
+                'amount': {
+                    'value': int(order.payment_amount_captured * 100) if order.payment_amount_captured else 0,
+                    'offset': 100
+                },
+                'transaction': {
+                    'pg_transaction_id': order.payment_reference_id or 'manual_resend',
+                    'method': {
+                        'type': order.payment_method or 'unknown'
+                    }
+                }
+            }
+
+        # Send payment success message
+        response = whatsapp_service.send_payment_success_message(order, payment_data)
+
+        if response and response.get('success', False):
+            return Response({
+                'success': True,
+                'message': 'Payment success message resent successfully',
+                'order_id': order.order_id,
+                'message_id': order.payment_success_message_id,
+                'sent_at': order.payment_success_sent_at.isoformat() if order.payment_success_sent_at else None
+            })
+        else:
+            return Response({
+                'error': f'Failed to resend payment success message: {response}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    except Exception as e:
+        logger.error(f"Error in resend_payment_success_message: {str(e)}")
+        return Response({
+            'error': f'Failed to resend payment success message: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

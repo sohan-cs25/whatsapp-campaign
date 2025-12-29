@@ -194,24 +194,50 @@ def process_payment_webhook(payload):
                     order.payment_captured_at = timezone.now()
                     logger.info(f"Payment captured for order {reference_id}: ₹{payment_amount}")
 
+                    # Update payment tracking fields before saving
+                    order.payment_reference_id = razorpay_payment_id
+                    order.razorpay_order_id = razorpay_order_id
+                    order.payment_method = payment_method
+                    order.payment_amount_captured = payment_amount
+                    order.payment_webhook_data = payload
+                    order.save()
+
+                    # Send payment success message (only if not already sent)
+                    if not order.payment_success_message_sent:
+                        try:
+                            from .whatsapp_service import OrderWhatsAppService
+                            whatsapp_service = OrderWhatsAppService()
+
+                            logger.info(f"🚀 Triggering payment success message for order {reference_id}")
+                            response = whatsapp_service.send_payment_success_message(order, payment_data)
+
+                            if response and response.get('success', False):
+                                logger.info(f"✅ Payment success message sent for order {reference_id}")
+                            else:
+                                logger.warning(f"❌ Failed to send payment success message for order {reference_id}: {response}")
+
+                        except Exception as e:
+                            logger.error(f"❌ Error sending payment success message for order {reference_id}: {str(e)}")
+                    else:
+                        logger.info(f"ℹ️ Payment success message already sent for order {reference_id}, skipping")
+
                 elif payment_status == 'failed':
                     order.payment_status = 'failed'
+                    order.payment_reference_id = razorpay_payment_id
+                    order.razorpay_order_id = razorpay_order_id
+                    order.payment_method = payment_method
+                    order.payment_webhook_data = payload
+                    order.save()
                     logger.warning(f"Payment failed for order {reference_id}")
 
                 elif payment_status == 'initiated':
                     order.payment_status = 'initiated'
+                    order.payment_reference_id = razorpay_payment_id
+                    order.razorpay_order_id = razorpay_order_id
+                    order.payment_method = payment_method
+                    order.payment_webhook_data = payload
+                    order.save()
                     logger.info(f"Payment initiated for order {reference_id}")
-
-                # Update payment tracking fields
-                order.payment_reference_id = razorpay_payment_id
-                order.razorpay_order_id = razorpay_order_id
-                order.payment_method = payment_method
-                order.payment_amount_captured = payment_amount
-
-                # Store complete webhook data for audit trail
-                order.payment_webhook_data = payload
-
-                order.save()
 
                 logger.info(f"Updated payment for order {reference_id}: {old_payment_status} -> {order.payment_status}")
                 logger.info(f"Payment details: method={payment_method}, amount=₹{payment_amount}, razorpay_payment_id={razorpay_payment_id}")

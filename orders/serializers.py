@@ -110,11 +110,15 @@ class OrderSerializer(serializers.ModelSerializer):
             'id', 'validated_file', 'validated_file_name', 'number', 'order_items', 'amount',
             'status', 'sent_at', 'message_id', 'response_code', 'response_json',
             'payment_status', 'delivered_at', 'read_at', 'payment_reference_id',
+            'payment_success_message_sent', 'payment_success_message_id',
+            'payment_success_sent_at', 'payment_success_message_status',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'validated_file_name', 'sent_at', 'message_id', 'response_code',
-            'response_json', 'delivered_at', 'read_at', 'created_at', 'updated_at'
+            'response_json', 'delivered_at', 'read_at', 'payment_success_message_sent',
+            'payment_success_message_id', 'payment_success_sent_at', 'payment_success_message_status',
+            'created_at', 'updated_at'
         ]
 
 
@@ -125,6 +129,7 @@ class OrderListSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'id', 'number', 'amount', 'status', 'payment_status',
+            'payment_success_message_sent', 'payment_success_message_status',
             'created_at', 'sent_at'
         ]
 

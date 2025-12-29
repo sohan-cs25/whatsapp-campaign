@@ -8,7 +8,8 @@ from .views import (
     processing_stats,
     analytics_dashboard,
     process_stream,
-    send_order_messages
+    send_order_messages,
+    resend_payment_success_message
 )
 
 app_name = 'orders'
@@ -29,4 +30,5 @@ urlpatterns = [
     path('analytics/', analytics_dashboard, name='analytics-dashboard'),
     path('process-stream/<uuid:file_id>/', process_stream, name='process-stream'),
     path('send-messages/', send_order_messages, name='send-order-messages'),
+    path('orders/<uuid:order_id>/resend-payment-success/', resend_payment_success_message, name='resend-payment-success'),
 ]

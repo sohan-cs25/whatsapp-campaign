@@ -742,7 +742,7 @@ def show_send_messages_page():
                                 data={'validated_file_id': file_id}
                             )
 
-                            progress_bar.progress(1.0)
+                            progress_bar.progress(100.0)
 
                             if send_response and send_response.status_code == 200:
                                 send_data = send_response.json()

@@ -143,6 +143,24 @@ class UnifiedWebhookRouter:
             self.logger.error(f"Error extracting payment reference ID: {e}")
             return ""
 
+    def _extract_payment_status(self, payload: Dict[str, Any]) -> str:
+        """Extract payment status from webhook payload"""
+        try:
+            # Handle Meta/WhatsApp webhook structure
+            if 'entry' in payload:
+                for entry in payload.get('entry', []):
+                    for change in entry.get('changes', []):
+                        value = change.get('value', {})
+                        if 'statuses' in value:
+                            for status in value['statuses']:
+                                if status.get('type') == 'payment':
+                                    return status.get('status', 'unknown')
+
+            return "unknown"
+        except Exception as e:
+            self.logger.error(f"Error extracting payment status: {e}")
+            return "unknown"
+
     def _is_campaign_message(self, message_id: str) -> bool:
         """Check if message_id belongs to campaigns app"""
         try:
@@ -222,6 +240,12 @@ class UnifiedWebhookRouter:
             elif webhook_type == 'payment_status':
                 # Create WebhookEvent record for orders app
                 payment_reference_id = self._extract_payment_reference_id(payload)
+
+                # Extract payment status for logging
+                payment_status = self._extract_payment_status(payload)
+
+                self.logger.info(f"🏦 Processing payment webhook: reference_id={payment_reference_id}, status={payment_status}")
+
                 from orders.models import WebhookEvent
                 webhook_event = WebhookEvent.objects.create(
                     event_type='payment_status',
@@ -243,8 +267,15 @@ class UnifiedWebhookRouter:
                             from orders.models import Order
                             order = Order.objects.get(order_id=payment_reference_id)
                             webhook_event.order = order
-                        except:
-                            pass
+
+                            # Log payment success message status
+                            if payment_status == 'captured' and order.payment_success_message_sent:
+                                self.logger.info(f"💬 Payment success message sent for order {payment_reference_id}: message_id={order.payment_success_message_id}")
+                            elif payment_status == 'captured':
+                                self.logger.warning(f"💬 Payment success message NOT sent for order {payment_reference_id}")
+
+                        except Exception as e:
+                            self.logger.warning(f"Could not link webhook to order {payment_reference_id}: {e}")
                 else:
                     webhook_event.processing_error = "Failed to process payment webhook"
                 webhook_event.save()
@@ -254,7 +285,9 @@ class UnifiedWebhookRouter:
                     'processor_used': 'orders.webhook_processor.process_payment_webhook',
                     'webhook_type': webhook_type,
                     'result': result,
-                    'webhook_event_id': webhook_event.id
+                    'webhook_event_id': webhook_event.id,
+                    'payment_reference_id': payment_reference_id,
+                    'payment_status': payment_status
                 }
 
             else:

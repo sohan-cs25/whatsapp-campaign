@@ -11,6 +11,7 @@ def process_360dialog_webhook(payload):
     Process 360dialog webhook payload for both campaigns and orders
     This function routes to appropriate processor based on message_id lookup
     """
+    print("webhook_payload",payload)
     from .models import Message, Campaign  # Import here to avoid circular import
 
     try:
@@ -85,7 +86,7 @@ def process_campaign_webhook_status(payload, status_update, message):
         old_status = message.status
 
         # Update message status based on webhook
-        if status == 'sent':
+        if status == 'sent' or status == 'accepted':
             # Ignore webhook 'sent' status - message already marked as sent on API success
             # Just log for debugging purposes
             logger.info(f"Webhook 'sent' received for message {message_id} - already handled on API success")

@@ -30,43 +30,89 @@ def normalize_phone_number(sender: str) -> str:
     # Return original if it's not a phone number pattern
     return sender.strip()
 
+#def parse_chat_content(text_content: str) -> List[Dict[str, str]]:
+#    """
+#    Parse WhatsApp chat text content and return structured data
+#    
+#    Args:
+#        text_content: Raw WhatsApp chat text content
+#        
+#    Returns:
+#        List of dictionaries containing parsed message data
+#    """
+#    # Regex pattern to capture WhatsApp messages
+#    # Supports format: DD/MM/YYYY, HH:MM - Sender: Message
+#    #pattern = re.compile(r"^(\d{2}/\d{2}/\d{4}), (\d{2}:\d{2}) - ([^:]+?): (.*)$")
+#    
+#    # Handles 1-2 digit days/months, 2-4 digit years, and optional AM/PM
+#    pattern = re.compile(r"^(\d{2}/\d{2}/\d{4}), (\d{1,2}:\d{2})\s?([AaPp][Mm])?\s?-\s?([^:]+?): (.*)$")
+#    messages = []
+#    lines = text_content.strip().split('\n')
+#    
+#    #print(f"DEBUG: Starting parse of {len(lines)} lines") # Check total lines
+#
+#    for line in lines:
+#        line = line.strip()
+#        if not line:  # Skip empty lines
+#            continue
+#            
+#        match = pattern.match(line)
+#        if match:
+#            #date, time, sender, message = match.groups()
+#            date, time_val, period, sender, message = match.groups()
+#
+#            # Normalize the time: If period (AM/PM) exists, use it; otherwise, just use time
+#            clean_period = f" {period.upper()}" if period else ""
+#            full_time = f"{time_val}{clean_period}"
+#
+#            messages.append({
+#                "Date": date,
+#                "Time": full_time,
+#                #"Time": time,
+#                # "Date-Time": f"{date} {time}",
+#                "Phone/Name": normalize_phone_number(sender),
+#                "Message": message.strip()
+#            })
+#        else:
+#            # Handle continuation of multiline messages
+#            if messages:
+#                messages[-1]["Message"] += " " + line
+#    
+#    return messages
+
 def parse_chat_content(text_content: str) -> List[Dict[str, str]]:
-    """
-    Parse WhatsApp chat text content and return structured data
-    
-    Args:
-        text_content: Raw WhatsApp chat text content
-        
-    Returns:
-        List of dictionaries containing parsed message data
-    """
-    # Regex pattern to capture WhatsApp messages
-    # Supports format: DD/MM/YYYY, HH:MM - Sender: Message
-    pattern = re.compile(r"^(\d{2}/\d{2}/\d{4}), (\d{2}:\d{2}) - ([^:]+?): (.*)$")
-    
+    # This regex has 5 capture groups:
+    # 1(Date), 2(Time), 3(AM/PM), 4(Sender), 5(Message)
+    pattern = re.compile(r"^(\d{2}/\d{2}/\d{4}), (\d{1,2}:\d{2})\s?([AaPp][Mm])?\s?-\s?([^:]+?): (.*)$")
+
     messages = []
     lines = text_content.strip().split('\n')
-    
+
     for line in lines:
         line = line.strip()
-        if not line:  # Skip empty lines
+        if not line:
             continue
-            
+
         match = pattern.match(line)
         if match:
-            date, time, sender, message = match.groups()
+            # FIX: You MUST have 5 variables here to match the 5 regex groups
+            date, time_val, period, sender, message = match.groups()
+
+            # Safely handle files that don't have AM/PM (period will be None)
+            clean_period = f" {period.upper()}" if period else ""
+            full_time = f"{time_val}{clean_period}" 
+
             messages.append({
                 "Date": date,
-                "Time": time,
-                # "Date-Time": f"{date} {time}",
+                "Time": full_time,
                 "Phone/Name": normalize_phone_number(sender),
                 "Message": message.strip()
             })
         else:
-            # Handle continuation of multiline messages
+            # Continues multiline messages like your product lists
             if messages:
                 messages[-1]["Message"] += " " + line
-    
+
     return messages
 
 def parse_chat_file(filename: str) -> List[Dict[str, str]]:

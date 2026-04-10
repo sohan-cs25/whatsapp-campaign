@@ -67,15 +67,16 @@ class OrderWhatsAppService:
             for i, (item_name, quantity) in enumerate(parsed_items):
                 # Use individual amount if available, otherwise split total equally
                 if i < len(individual_amounts):
-                    item_amount = individual_amounts[i]
+                    line_total = individual_amounts[i]
+                    unit_price = int(line_total / quantity)
                 else:
                     # Fallback: equal distribution
-                    item_amount = int(total_amount / len(parsed_items)) if parsed_items else total_amount
+                    unit_price = int(total_amount / len(parsed_items)) if parsed_items else total_amount
 
                 items.append({
                     "amount": {
                         "offset": 100,  # For paisa conversion (multiply by 100)
-                        "value": item_amount * 100  # Convert to paisa
+                        "value": unit_price * 100  # Convert to paisa
                     },
                     "name": item_name,
                     "quantity": quantity,
@@ -84,7 +85,7 @@ class OrderWhatsAppService:
                 })
 
                 logger.debug("Parsed item: %s x%d = ₹%d (value: %d paisa)",
-                           item_name, quantity, item_amount, item_amount * 100)
+                           item_name, quantity, unit_price, unit_price * 100)
 
             return items, total_amount * 100  # Return total in paisa
 

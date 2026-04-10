@@ -13,6 +13,97 @@ from .models import ChatFile, ParsedChatFile, ValidatedFile, Order
 
 logger = logging.getLogger(__name__)
 
+def get_prices_from_google_sheet() -> dict:
+    import requests
+    from io import StringIO
+    from django.core.cache import cache
+    from decouple import config
+
+    CACHE_KEY = 'price_list_from_sheet'
+    CACHE_TIMEOUT = 600  # 10 minutes
+
+    cached = cache.get(CACHE_KEY)
+    if cached is not None:
+        logger.info("Using cached price list")
+        return cached
+
+    try:
+        sheet_url = config('PRICE_LIST_SHEET_URL')
+        logger.info("Fetching price list from Google Sheet...")
+        response = requests.get(sheet_url, timeout=10)
+        response.raise_for_status()
+
+        df = pd.read_csv(StringIO(response.text))
+        df.columns = [c.strip().lower() for c in df.columns]
+
+        item_col = next((c for c in df.columns if c in ['item', 'product', 'name']), None)
+        price_col = next((c for c in df.columns if c in ['price', 'rate', 'amount']), None)
+
+        if not item_col or not price_col:
+            logger.error(f"Could not find Item/Price columns. Found: {list(df.columns)}")
+            return {}
+
+        prices = {
+            str(row[item_col]).strip().lower(): float(row[price_col])
+            for _, row in df.iterrows()
+            if pd.notna(row[item_col]) and pd.notna(row[price_col])
+        }
+
+        logger.info(f"Loaded {len(prices)} prices from Google Sheet: {prices}")
+        cache.set(CACHE_KEY, prices, CACHE_TIMEOUT)
+        return prices
+
+    except Exception as e:
+        logger.error(f"Error fetching price list from Google Sheet: {e}")
+        return {}
+
+
+def calculate_amount_from_items(items_str: str) -> str:
+    """
+    items_str:  "Strawberry: 2, Nagpur orange: 1"
+    Sheet:       Strawberry=150, Nagpur orange=200
+    Calculates:  150*2 + 200*1 = 500
+    Returns:     "300+200=500"
+    """
+    if not items_str or items_str.strip() == '':
+        return ''
+
+    try:
+        prices = get_prices_from_google_sheet()
+        if not prices:
+            logger.warning("No prices available — Total_Amount will be empty")
+            return ''
+
+        individual_amounts = []
+        total = 0
+
+        for part in items_str.split(','):
+            part = part.strip()
+            if ':' not in part:
+                continue
+            item_name, qty_str = part.split(':', 1)
+            item_name = item_name.strip()
+            qty = int(float(qty_str.strip()))
+
+            unit_price = prices.get(item_name.lower(), 0)
+            if unit_price == 0:
+                logger.warning(f"No price found for '{item_name}' in sheet")
+
+            line_total = int(unit_price * qty)
+            individual_amounts.append(str(line_total))
+            total += line_total
+            logger.info(f"   {item_name} x{qty} @ ₹{unit_price} = ₹{line_total}")
+
+        if not individual_amounts:
+            return ''
+
+        result = '+'.join(individual_amounts) + '=' + str(total)
+        logger.info(f"   Final amount: {result}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error calculating amount for '{items_str}': {e}")
+        return ''
 
 def process_chat_file_content(chat_file: ChatFile) -> Dict:
     """
@@ -368,7 +459,8 @@ def extract_orders_from_validated_file_sync(validated_file: ValidatedFile) -> Li
                 logger.info(f"   Processed amount_str: '{amount_str}'")
 
                 # Skip rows with missing essential data
-                if not phone_number or not order_items_str or not amount_str:
+                #if not phone_number or not order_items_str or not amount_str:
+                if not phone_number or not order_items_str:    
                     logger.warning(f"Skipping row {index + 1}: missing data")
                     continue
 
@@ -378,14 +470,25 @@ def extract_orders_from_validated_file_sync(validated_file: ValidatedFile) -> Li
                     continue
 
                 # Create Order instance - order_id will be auto-generated
-                order = Order.objects.create(
-                    validated_file=validated_file,
-                    number=phone_number,
-                    order_items=order_items_str,  # Store as string: "Apples:1,Pears:2"
-                    amount=amount_str,  # Store as string: "150+200=350"
-                    status='pending'
-                )
+                #order = Order.objects.create(
+                #    validated_file=validated_file,
+                #    number=phone_number,
+                #    order_items=order_items_str,  # Store as string: "Apples:1,Pears:2"
+                #    amount=amount_str,  # Store as string: "150+200=350"
+                #    status='pending'
+                #)
+                
+                calculated_amount = calculate_amount_from_items(order_items_str)
+                final_amount = calculated_amount if calculated_amount else amount_str
+                logger.info(f"   Amount from sheet: '{calculated_amount}' | fallback: '{amount_str}' | using: '{final_amount}'")
 
+                order = Order.objects.create(
+                validated_file=validated_file,
+                number=phone_number,
+                order_items=order_items_str,
+                amount=final_amount,
+                status='pending'
+                )
                 created_orders.append(order)
                 logger.debug(f"Created order {order.order_id} for {phone_number}")
 

@@ -22,7 +22,11 @@ def process_order_webhook_status(payload):
                     if 'statuses' in value:
                         payload = value  # Extract the nested value
                         break
-
+        if 'statuses' in payload:
+            has_payment = any(s.get('type') == 'payment' for s in payload.get('statuses', []))
+            if has_payment:
+                logger.info("Payment webhook detected — routing to process_payment_webhook")
+                return process_payment_webhook(payload)
         # Process status updates
         if 'statuses' in payload:
             for status_update in payload['statuses']:
@@ -88,7 +92,7 @@ def process_order_webhook_status(payload):
 
                 except Order.DoesNotExist:
                     logger.warning(f"Order not found for message ID: {message_id}")
-                    return False
+                    continue
                 except Exception as e:
                     logger.error(f"Error updating order {message_id}: {e}")
                     return False

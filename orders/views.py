@@ -700,80 +700,77 @@ def analytics_dashboard(request):
 @permission_classes([IsAuthenticated])
 def process_stream(request, file_id):
     """
-    Stream processing progress for a chat file
+    Poll processing status for a chat file.
+    Replaced SSE (Server-Sent Events) with simple JSON polling so that
+    switching browser tabs does NOT break the connection — each poll is
+    an independent HTTP request.
+
+    Returns JSON with status, progress, and result info.
+    The Streamlit frontend should call this every 10-15 seconds.
     """
-    def stream_progress():
-        try:
-            # Check if file exists and belongs to user
-            chat_file = ChatFile.objects.get(
-                id=file_id,
-                user=request.user
-            )
+    try:
+        chat_file = ChatFile.objects.get(id=file_id, user=request.user)
 
-            # Send initial status
-            yield f"data: {json.dumps({'status': 'starting', 'message': 'Initializing processing...', 'progress': 0})}\n\n"
+        # ── Completed ──────────────────────────────────────────
+        if chat_file.is_processed:
+            try:
+                processed_file = chat_file.processed_file
+                return Response({
+                    'status': 'completed',
+                    'message': 'Processing completed successfully!',
+                    'progress': 100,
+                    'processed_file_id': str(processed_file.id),
+                    'total_messages': processed_file.total_messages,
+                    'total_orders': processed_file.total_orders,
+                    'total_queries': processed_file.total_queries,
+                })
+            except ParsedChatFile.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'Processing completed but output file not found.',
+                    'progress': 0,
+                })
 
-            # Monitor processing progress
-            max_wait_time = 600  # 10 minutes
-            check_interval = 2   # Check every 2 seconds
-            elapsed_time = 0
+        # ── Error ──────────────────────────────────────────────
+        if chat_file.processing_error:
+            return Response({
+                'status': 'error',
+                'message': chat_file.processing_error,
+                'progress': 0,
+            })
 
-            while elapsed_time < max_wait_time:
-                # Refresh from database
-                chat_file.refresh_from_db()
+        # ── Still processing — estimate progress from elapsed time ──
+        elapsed = (timezone.now() - chat_file.uploaded_at).total_seconds()
 
-                if chat_file.processing_error:
-                    yield f"data: {json.dumps({'status': 'error', 'message': chat_file.processing_error, 'progress': 0})}\n\n"
-                    break
+        if elapsed < 30:
+            message = "Parsing chat messages..."
+            progress = 10
+        elif elapsed < 120:
+            message = "Classifying messages with AI (batch 1)..."
+            progress = 30
+        elif elapsed < 240:
+            message = "Classifying messages with AI (batch 2)..."
+            progress = 55
+        elif elapsed < 360:
+            message = "Classifying messages with AI (batch 3)..."
+            progress = 70
+        else:
+            message = "Generating final output file..."
+            progress = 85
 
-                if chat_file.is_processed:
-                    # Check if processed file was created
-                    try:
-                        processed_file = chat_file.processed_file
-                        yield f"data: {json.dumps({'status': 'completed', 'message': 'Processing completed successfully!', 'progress': 100, 'processed_file_id': str(processed_file.id)})}\n\n"
-                    except ParsedChatFile.DoesNotExist:
-                        yield f"data: {json.dumps({'status': 'error', 'message': 'Processing completed but no output file found', 'progress': 0})}\n\n"
-                    break
+        return Response({
+            'status': 'processing',
+            'message': message,
+            'progress': progress,
+            'elapsed_seconds': int(elapsed),
+        })
 
-                # Calculate rough progress based on elapsed time
-                # This is a simple estimation - you could make this more sophisticated
-                estimated_progress = min(int((elapsed_time / 300) * 80), 80)  # Cap at 80% until completion
-
-                if elapsed_time < 30:
-                    message = "Parsing chat messages..."
-                    progress = estimated_progress
-                elif elapsed_time < 120:
-                    message = "Classifying messages with AI..."
-                    progress = min(estimated_progress + 10, 85)
-                else:
-                    message = "Generating final output file..."
-                    progress = min(estimated_progress + 15, 95)
-
-                yield f"data: {json.dumps({'status': 'processing', 'message': message, 'progress': progress})}\n\n"
-
-                time.sleep(check_interval)
-                elapsed_time += check_interval
-
-            # If we exit the loop without completion, it's a timeout
-            if not chat_file.is_processed and not chat_file.processing_error:
-                yield f"data: {json.dumps({'status': 'timeout', 'message': 'Processing is taking longer than expected. Please check back later.', 'progress': 0})}\n\n"
-
-        except ChatFile.DoesNotExist:
-            yield f"data: {json.dumps({'status': 'error', 'message': 'File not found or access denied', 'progress': 0})}\n\n"
-        except Exception as e:
-            logger.error(f"Error in process stream: {str(e)}")
-            yield f"data: {json.dumps({'status': 'error', 'message': 'An unexpected error occurred', 'progress': 0})}\n\n"
-
-    response = StreamingHttpResponse(
-        stream_progress(),
-        content_type='text/event-stream'
-    )
-    response['Cache-Control'] = 'no-cache'
-    response['Connection'] = 'keep-alive'
-    response['Access-Control-Allow-Origin'] = '*'
-    response['Access-Control-Allow-Headers'] = 'Cache-Control'
-
-    return response
+    except ChatFile.DoesNotExist:
+        return Response({
+            'status': 'error',
+            'message': 'File not found or access denied.',
+            'progress': 0,
+        }, status=404)
 
 
 @api_view(['POST'])

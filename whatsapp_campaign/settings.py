@@ -29,6 +29,12 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=lambda v: [s.strip() for s in v.split(',')])
 
+ALLOWED_HOSTS = ['3.108.234.165', '127.0.0.1', 'localhost', 'uncompetently-cyathiform-lennon.ngrok-free.dev','98e6260bb0de.ngrok-free.app']
+
+CSRF_TRUSTED_ORIGINS = [
+    'https://uncompetently-cyathiform-lennon.ngrok-free.dev',
+    'https://98e6260bb0de.ngrok-free.app',
+]
 
 # Application definition
 
@@ -210,13 +216,16 @@ CELERY_BEAT_SCHEDULE = {
 #     'APP_SECRET': config('WHATSAPP_APP_SECRET'),
 # }
 WHATSAPP_CONFIG = {
-    'API_KEY': config('WHATSAPP_360_API_KEY', default=''),
+    'API_KEY': config('WHATSAPP_360_API_KEY', default='xgpAk3uGXydFNiPNkUOwOV8BAK'),
     'API_URL': config('WHATSAPP_360_API_URL', default='https://waba-v2.360dialog.io'),
-    'WEBHOOK_URL': config('WHATSAPP_360_WEBHOOK_URL', default=''),
+    'WEBHOOK_URL': config('WHATSAPP_360_WEBHOOK_URL', default='https://uncompetently-cyathiform-lennon.ngrok-free.dev/webhook/whatsapp/'),
 }
 
 # Groq AI Configuration for Orders App
-GROQ_API_KEY = config('GROQ_API_KEY', default='')
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+#GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 
 
 # Rate Limiting

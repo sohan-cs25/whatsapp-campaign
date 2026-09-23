@@ -27,8 +27,10 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-=b4*)-31q$i7q_lexehiz
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=lambda v: [s.strip() for s in v.split(',')])
-
+#ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=lambda v: [s.strip() for s in v.split(',')])
+ALLOWED_HOSTS = ['3.108.234.165', '127.0.0.1', 'localhost', 
+                 'uncompetently-cyathiform-lennon.ngrok-free.app',
+                 'uncompetently-cyathiform-lennon.ngrok-free.dev']
 
 # Application definition
 

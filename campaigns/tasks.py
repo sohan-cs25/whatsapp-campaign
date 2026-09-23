@@ -434,33 +434,62 @@ def process_webhook_status(webhook_log_id):
 
 
 @shared_task
+#def process_unified_webhook_status(webhook_log_id):
+#    """
+#    Process webhook using unified router for campaigns, orders, and payments
+#    """
+#    try:
+#        webhook_log = WebhookLog.objects.get(id=webhook_log_id)
+#
+#        # Use unified router to process webhook
+#        from unified_webhook_router import route_unified_webhook
+#
+#        result = route_unified_webhook(webhook_log.raw_payload)
+#
+#        # Mark as processed
+#        webhook_log.processed = True
+#        webhook_log.processed_at = timezone.now()
+#        webhook_log.save()
+#
+#        logger.info(f"Webhook {webhook_log_id} processed using {result.get('processor_used')}")
+#
+#        return {
+#            'webhook_id': webhook_log_id,
+#            'success': result.get('success', False),
+#            'processor_used': result.get('processor_used'),
+#            'webhook_type': result.get('webhook_type')
+#        }
+#
+#    except WebhookLog.DoesNotExist:
+#        logger.error(f"Webhook log {webhook_log_id} not found")
+#    except Exception as e:
+#        logger.error(f"Error processing unified webhook {webhook_log_id}: {str(e)}")
+
+
 def process_unified_webhook_status(webhook_log_id):
-    """
-    Process webhook using unified router for campaigns, orders, and payments
-    """
     try:
         webhook_log = WebhookLog.objects.get(id=webhook_log_id)
 
-        # Use unified router to process webhook
-        from unified_webhook_router import route_unified_webhook
+        try:
+            from unified_webhook_router import route_unified_webhook
+            result = route_unified_webhook(webhook_log.raw_payload)
+            success = result.get('success', False)
+            processor = result.get('processor_used', 'unified')
+        except ImportError:
+            logger.info("unified_webhook_router not found, falling back to process_360dialog_webhook")
+            success = process_360dialog_webhook(webhook_log.raw_payload)
+            processor = 'campaigns_fallback'
 
-        result = route_unified_webhook(webhook_log.raw_payload)
-
-        # Mark as processed
-        webhook_log.processed = True
+        webhook_log.processed = success
         webhook_log.processed_at = timezone.now()
+        if not success:
+            webhook_log.error_message = f"Processor '{processor}' returned failure"
         webhook_log.save()
 
-        logger.info(f"Webhook {webhook_log_id} processed using {result.get('processor_used')}")
-
-        return {
-            'webhook_id': webhook_log_id,
-            'success': result.get('success', False),
-            'processor_used': result.get('processor_used'),
-            'webhook_type': result.get('webhook_type')
-        }
+        logger.info(f"Webhook {webhook_log_id} processed via '{processor}': success={success}")
+        return {'webhook_id': webhook_log_id, 'success': success, 'processor_used': processor}
 
     except WebhookLog.DoesNotExist:
         logger.error(f"Webhook log {webhook_log_id} not found")
     except Exception as e:
-        logger.error(f"Error processing unified webhook {webhook_log_id}: {str(e)}")
+        logger.error(f"Error processing unified webhook {webhook_log_id}: {e}")

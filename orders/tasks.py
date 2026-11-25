@@ -97,6 +97,13 @@ def process_chat_file(self, chat_file_id):
             total_queries=stats.message_types.get('enquiry', 0)
         )
 
+        # Step 5: One priced order per customer, ready for review in the app
+        from .order_builder import build_orders
+        orders = build_orders(parsed_file, run_result.get("orders"))
+        parsed_file.total_orders = len(orders)
+        parsed_file.save(update_fields=['total_orders'])
+        logger.info(f"Built {len(orders)} customer orders for review")
+
         # Mark original file as processed
         chat_file.is_processed = True
         chat_file.processed_at = timezone.now()
@@ -110,7 +117,7 @@ def process_chat_file(self, chat_file_id):
             'chat_file_id': str(chat_file.id),
             'parsed_file_id': str(parsed_file.id),
             'total_messages': stats.total_messages,
-            'total_orders': stats.orders_found,
+            'total_orders': parsed_file.total_orders,
             'total_queries': stats.message_types.get('enquiry', 0),
             'processing_time': stats.processing_time,
             'success_rate': stats.success_rate,

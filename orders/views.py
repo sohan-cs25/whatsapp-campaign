@@ -18,6 +18,9 @@ import mimetypes
 import json
 import time
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+from .tasks import ORDER_SEND_GAP_SECONDS, send_validated_file_orders
 from .whatsapp_service import OrderWhatsAppService
 
 from .models import ChatFile, ParsedChatFile, ValidatedFile, Order, WebhookEvent
@@ -774,84 +777,39 @@ def process_stream(request, file_id):
 @permission_classes([IsAuthenticated])
 def send_order_messages(request):
     """
-    Send WhatsApp messages for orders synchronously with 2-second delay
+    Queue WhatsApp order messages for a validated file (legacy flow). Returns at once;
+    a Celery worker sends them 2 seconds apart and each order's status moves
+    pending -> sending -> sent/failed (poll the orders list to follow progress).
 
-    Expected payload:
-    {
-        "validated_file_id": "uuid-here"
-    }
-
-    Returns:
-    {
-        "success": true,
-        "total_orders": 5,
-        "sent_count": 4,
-        "failed_count": 1,
-        "total_time_seconds": 10,
-        "results": [
-            {
-                "order_id": "2025091500001",
-                "number": "919474816594",
-                "status": "sent",
-                "message_id": "wamid_xyz"
-            }
-        ]
-    }
+    Payload: {"validated_file_id": "uuid"}
+    Returns 202: {"success": true, "queued": 5, "total_orders": 5, "estimated_seconds": 10}
     """
+    validated_file_id = request.data.get('validated_file_id')
+    if not validated_file_id:
+        return Response({'error': 'validated_file_id is required'}, status=status.HTTP_400_BAD_REQUEST)
     try:
-        validated_file_id = request.data.get('validated_file_id')
+        validated_file = ValidatedFile.objects.get(id=validated_file_id, user=request.user)
+    except (ValidatedFile.DoesNotExist, ValueError, DjangoValidationError):
+        return Response({'error': 'Validated file not found or access denied'}, status=status.HTTP_404_NOT_FOUND)
 
-        if not validated_file_id:
-            return Response({
-                'error': 'validated_file_id is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
+    pending = Order.objects.filter(validated_file=validated_file, status='pending')
+    # In the legacy flow, uploading the reviewed file is the approval. Orders created before
+    # the review redesign may still be 'draft', and only approved orders are sent.
+    pending.exclude(review_status='approved').update(review_status='approved')
+    queued = pending.count()
+    if not queued:
+        return Response({'error': 'No pending orders found for this validated file'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
-        # Get validated file and verify ownership
-        try:
-            validated_file = ValidatedFile.objects.get(
-                id=validated_file_id,
-                user=request.user
-            )
-        except ValidatedFile.DoesNotExist:
-            return Response({
-                'error': 'Validated file not found or access denied'
-            }, status=status.HTTP_404_NOT_FOUND)
-
-        # Get pending orders for this validated file
-        orders = Order.objects.filter(
-            validated_file=validated_file,
-            status='pending'
-        ).order_by('created_at')
-
-        if not orders.exists():
-            return Response({
-                'error': 'No pending orders found for this validated file'
-            }, status=status.HTTP_400_BAD_REQUEST)
-
-        logger.info(f"Starting to send {orders.count()} order messages for {validated_file.file_name}")
-
-        # Initialize WhatsApp service
-        whatsapp_service = OrderWhatsAppService()
-
-        # Send messages with 2-second delay
-        results = whatsapp_service.send_bulk_orders(orders, delay_seconds=2.0)
-
-        # Return detailed results
-        return Response({
-            'success': True,
-            'message': f'Processed {orders.count()} orders',
-            'total_orders': orders.count(),
-            'sent_count': results['sent_count'],
-            'failed_count': results['failed_count'],
-            'total_time_seconds': results['total_time_seconds'],
-            'results': results['details']
-        })
-
-    except Exception as e:
-        logger.error(f"Error in send_order_messages: {str(e)}")
-        return Response({
-            'error': f'Failed to send messages: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    send_validated_file_orders.delay(str(validated_file.id))
+    logger.info(f"Queued {queued} order messages for {validated_file.file_name}")
+    return Response({
+        'success': True,
+        'message': f'Queued {queued} orders; messages go out every {ORDER_SEND_GAP_SECONDS} seconds',
+        'queued': queued,
+        'total_orders': queued,
+        'estimated_seconds': queued * ORDER_SEND_GAP_SECONDS,
+    }, status=status.HTTP_202_ACCEPTED)
 
 
 @api_view(['POST'])

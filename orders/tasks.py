@@ -374,16 +374,30 @@ def cleanup_old_files():
 ORDER_SEND_GAP_SECONDS = 2
 
 
+def _schedule_order_sends(orders, label):
+    """Queue one send_single_order per order, 2 seconds apart. Duplicates are harmless:
+    send_single_order claims each order (pending -> sending) before sending it."""
+    ids = [str(o.id) for o in orders.order_by('created_at')]
+    for i, order_id in enumerate(ids):
+        send_single_order.apply_async(args=[order_id], countdown=i * ORDER_SEND_GAP_SECONDS)
+    logger.info(f"Scheduled {len(ids)} order messages for {label}")
+    return {'scheduled': len(ids)}
+
+
 @shared_task
 def send_order_batch(parsed_file_id):
     """Schedule every approved, unsent order of a processed chat file, 2 seconds apart."""
-    orders = Order.objects.filter(parsed_file_id=parsed_file_id, review_status='approved',
-                                  status='pending').order_by('created_at')
-    ids = [str(o.id) for o in orders]
-    for i, order_id in enumerate(ids):
-        send_single_order.apply_async(args=[order_id], countdown=i * ORDER_SEND_GAP_SECONDS)
-    logger.info(f"Scheduled {len(ids)} order messages for parsed file {parsed_file_id}")
-    return {'scheduled': len(ids)}
+    return _schedule_order_sends(
+        Order.objects.filter(parsed_file_id=parsed_file_id, review_status='approved', status='pending'),
+        f"parsed file {parsed_file_id}")
+
+
+@shared_task
+def send_validated_file_orders(validated_file_id):
+    """Legacy flow: schedule every approved, unsent order of a validated file, 2 seconds apart."""
+    return _schedule_order_sends(
+        Order.objects.filter(validated_file_id=validated_file_id, review_status='approved', status='pending'),
+        f"validated file {validated_file_id}")
 
 
 @shared_task

@@ -872,105 +872,42 @@ def show_send_messages_page():
                                     st.markdown(f"[📥 Download Excel]({export_url})")
 
                 # Message sending section
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    template_name = st.text_input(
-                        "WhatsApp Template Name",
-                        value="sample_order_details",
-                        help="Approved WhatsApp Business template name"
-                    )
-
-                with col2:
-                    delay_seconds = st.slider(
-                        "Delay between messages (seconds)",
-                        min_value=1.0,
-                        max_value=10.0,
-                        value=2.0,
-                        step=0.5,
-                        help="Time delay between sending messages"
-                    )
+                st.caption("Messages use the sample_order_details template and go out every 2 seconds "
+                           "in the background. Sending again only picks up orders that are still pending.")
 
                 if st.button("📤 Send Order Messages", type="primary", use_container_width=True):
-                    # Extract orders first if not done
+                    # Extract orders first if not done (a file already extracted is fine)
                     extract_response = make_api_request(
                         f"{API_ENDPOINTS['orders']['validated_files']}{file_id}/extract_orders/",
                         method="POST"
                     )
+                    extracted = extract_response is not None and extract_response.status_code == 200
+                    already = (extract_response is not None and extract_response.status_code == 400
+                               and "already" in extract_response.json().get('error', ''))
 
-                    if extract_response and extract_response.status_code == 200:
-                        extract_data = extract_response.json()
-                        orders_extracted = extract_data.get('orders_extracted', 0)
+                    if extracted or already:
+                        if extracted:
+                            st.success(f"✅ Extracted {extract_response.json().get('orders_extracted', 0)} orders")
 
-                        st.success(f"✅ Extracted {orders_extracted} orders successfully!")
-
-                        if orders_extracted > 0:
-                            # Show time estimation
-                            estimated_time = orders_extracted * 2  # 2 seconds per message
-                            st.info(f"⏱️ Estimated sending time: ~{estimated_time} seconds ({estimated_time//60}m {estimated_time%60}s)")
-
-                            # Send messages using new synchronous endpoint
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
-
-                            status_text.text("📤 Sending WhatsApp messages (2-second delay between messages)...")
-
-                            # Call the new send messages endpoint
-                            send_response = make_api_request(
-                                f"{API_ENDPOINTS['orders']['send_messages']}",
-                                method="POST",
-                                data={'validated_file_id': file_id}
-                            )
-
-                            progress_bar.progress(100.0)
-
-                            if send_response and send_response.status_code == 200:
-                                send_data = send_response.json()
-
-                                st.success("✅ Messages sent successfully!")
-
-                                # Show summary
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("📤 Total Orders", send_data.get('total_orders', 0))
-                                with col2:
-                                    st.metric("✅ Sent", send_data.get('sent_count', 0))
-                                with col3:
-                                    st.metric("❌ Failed", send_data.get('failed_count', 0))
-
-                                st.info(f"⏱️ Total time: {send_data.get('total_time_seconds', 0)} seconds")
-
-                                # Show detailed results
-                                if send_data.get('results'):
-                                    st.subheader("📋 Detailed Results")
-
-                                    results_df = pd.DataFrame(send_data['results'])
-
-                                    # Format the display
-                                    display_df = results_df[['order_id', 'number', 'status']].copy()
-                                    display_df.columns = ['Order ID', 'Phone Number', 'Status']
-
-                                    # Add status icons
-                                    display_df['Status'] = display_df['Status'].apply(
-                                        lambda x: f"✅ {x}" if x == 'sent' else f"❌ {x}"
-                                    )
-
-                                    st.dataframe(display_df, use_container_width=True)
-
-                            else:
-                                error_msg = "Failed to send messages"
-                                if send_response:
-                                    error_data = send_response.json()
-                                    error_msg = error_data.get('error', error_msg)
-                                st.error(f"❌ {error_msg}")
+                        send_response = make_api_request(
+                            f"{API_ENDPOINTS['orders']['send_messages']}",
+                            method="POST",
+                            data={'validated_file_id': file_id}
+                        )
+                        if send_response is not None and send_response.status_code == 202:
+                            send_data = send_response.json()
+                            secs = send_data.get('estimated_seconds', 0)
+                            st.success(f"📤 Queued {send_data.get('queued', 0)} messages. They will all be out "
+                                       f"in about {secs // 60}m {secs % 60}s; press 🔄 Refresh Status to follow progress.")
                         else:
-                            st.warning("⚠️ No orders found to send messages for")
-
+                            error_msg = "Failed to queue messages"
+                            if send_response is not None:
+                                error_msg = send_response.json().get('error', error_msg)
+                            st.error(f"❌ {error_msg}")
                     else:
                         error_msg = "Failed to extract orders from validated file"
-                        if extract_response:
-                            error_data = extract_response.json()
-                            error_msg = error_data.get('error', error_msg)
+                        if extract_response is not None:
+                            error_msg = extract_response.json().get('error', error_msg)
                         st.error(f"❌ {error_msg}")
         else:
             st.info("No validated files found. Please validate some orders first.")

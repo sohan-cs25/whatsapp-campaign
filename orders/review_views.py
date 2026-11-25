@@ -3,11 +3,13 @@ Review flow: list a processed chat file's customer orders, edit them (re-priced 
 server), approve the ones without blocking issues, and queue approved orders for sending.
 """
 
+import uuid
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import Order, OrderLine, ParsedChatFile, Product
@@ -84,7 +86,12 @@ def approve_orders(request, parsed_file_id):
     if request.data.get('all_clean'):
         candidates = candidates.filter(review_status='draft', needs_review=False)
     else:
-        candidates = candidates.filter(id__in=request.data.get('order_ids') or [])
+        ids = request.data.get('order_ids') or []
+        try:
+            ids = [str(uuid.UUID(str(i))) for i in ids]
+        except ValueError:
+            return Response({'error': 'order_ids must be order UUIDs'}, status=status.HTTP_400_BAD_REQUEST)
+        candidates = candidates.filter(id__in=ids)
 
     approved, refused = [], []
     for order in candidates.order_by('customer_name'):
@@ -98,7 +105,7 @@ def approve_orders(request, parsed_file_id):
         approved.append(str(order.id))
     # Keep the caller's order for explicit ids
     if not request.data.get('all_clean'):
-        wanted = [str(i) for i in request.data.get('order_ids') or []]
+        wanted = ids
         approved.sort(key=lambda i: wanted.index(i) if i in wanted else len(wanted))
     return Response({'approved': approved, 'refused': refused})
 
@@ -115,8 +122,10 @@ def send_approved_orders(request, parsed_file_id):
 
 
 class ProductViewSet(viewsets.ModelViewSet):
-    """Products and prices. Delete deactivates, so past order lines keep their product."""
-    permission_classes = [IsAuthenticated]
+    """Products and prices. Delete deactivates, so past order lines keep their product.
+    Any signed-in user can read; changing prices needs the orders add/change/delete_product
+    permission (superusers have it)."""
+    permission_classes = [IsAuthenticated, DjangoModelPermissions]
     serializer_class = ProductSerializer
     queryset = Product.objects.all()
     pagination_class = None

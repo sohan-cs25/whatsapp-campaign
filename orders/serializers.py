@@ -198,6 +198,11 @@ class LineInputSerializer(serializers.Serializer):
     product = serializers.CharField(allow_null=True, required=False)
     name = serializers.CharField(max_length=120)
     quantity = serializers.DecimalField(max_digits=10, decimal_places=3, allow_null=True, required=False)
+
+    def validate_quantity(self, q):
+        if q is not None and q <= 0:
+            raise serializers.ValidationError("Quantity must be greater than 0; remove the line instead")
+        return q
     unit = serializers.ChoiceField(choices=UNITS + [''], allow_blank=True, required=False, default='')
 
     def validate_product(self, key):

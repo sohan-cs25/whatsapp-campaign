@@ -200,6 +200,11 @@ CELERY_BEAT_SCHEDULE = {
             'expires': 300,  # Expire after 5 minutes if not executed
         }
     },
+    'fail-stuck-sending-orders': {
+        'task': 'orders.tasks.fail_stuck_sending_orders',
+        'schedule': crontab(minute='*/5'),
+        'options': {'expires': 300},
+    },
 }
 
 # WhatsApp Configuration

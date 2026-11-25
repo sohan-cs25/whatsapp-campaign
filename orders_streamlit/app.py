@@ -10,6 +10,7 @@ import pandas as pd
 import json
 from datetime import datetime
 import time
+from product_rows import product_row_changed
 from config import API_BASE_URL, API_ENDPOINTS, APP_NAME, APP_ICON, PAGE_ICON, LAYOUT
 
 # Page configuration
@@ -449,7 +450,7 @@ def show_products_editor(products):
                 resp = make_api_request(API_ENDPOINTS['orders']['products'], "POST", body)
             else:
                 old = original.get(int(r["id"]), {})
-                if all(str(old.get(k)) == str(v) for k, v in body.items()):
+                if not product_row_changed(old, body):
                     continue
                 resp = make_api_request(f"{API_ENDPOINTS['orders']['products']}{int(r['id'])}/", "PATCH", body)
             if resp is None or resp.status_code not in (200, 201):

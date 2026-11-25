@@ -2,6 +2,7 @@ from decimal import Decimal as D
 from io import StringIO
 from unittest.mock import patch
 
+from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import TestCase
 from rest_framework.test import APITestCase
@@ -12,7 +13,10 @@ from orders.tests.helpers import make_products, make_user
 
 class ProductApiTests(APITestCase):
     def setUp(self):
-        self.client.force_authenticate(make_user())
+        user = make_user()  # a price editor: holds the product model permissions
+        user.user_permissions.add(*Permission.objects.filter(
+            codename__in=["add_product", "change_product", "delete_product"]))
+        self.client.force_authenticate(user)
         self.mango, _ = make_products()
 
     def test_product_delete_deactivates(self):

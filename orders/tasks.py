@@ -7,6 +7,7 @@ from celery import shared_task
 from django.utils import timezone
 from django.core.exceptions import ObjectDoesNotExist
 import logging
+from datetime import timedelta
 import os
 
 from .models import ChatFile, ParsedChatFile, ValidatedFile, Order
@@ -388,16 +389,35 @@ def send_order_batch(parsed_file_id):
 @shared_task
 def send_single_order(order_id):
     """Send one approved order. The pending -> sending claim makes duplicate tasks harmless."""
-    claimed = Order.objects.filter(id=order_id, status='pending',
-                                   review_status='approved').update(status='sending')
+    claimed = Order.objects.filter(id=order_id, status='pending', review_status='approved').update(
+        status='sending', updated_at=timezone.now())
     if not claimed:
         logger.info(f"Order {order_id} not pending+approved; skipping send")
         return 'skipped'
-    from .whatsapp_service import OrderWhatsAppService
+    from . import whatsapp_service
     order = Order.objects.get(id=order_id)
     try:
-        OrderWhatsAppService().send_order_message(order)
+        whatsapp_service.OrderWhatsAppService().send_order_message(order)
     except Exception as e:
         logger.error(f"Sending order {order_id} failed: {e}")
+        # The service marks failures itself; this covers errors raised before it got that far.
+        Order.objects.filter(id=order_id, status='sending').update(
+            status='failed', whatsapp_response_json={'error': str(e)}, updated_at=timezone.now())
     order.refresh_from_db()
     return order.status
+
+
+STUCK_SENDING_AFTER = timedelta(minutes=15)
+
+
+@shared_task
+def fail_stuck_sending_orders():
+    """Orders left in 'sending' (worker killed mid-send) are marked failed, not re-sent: the
+    WhatsApp message may already have gone out, so a person decides whether to resend."""
+    cutoff = timezone.now() - STUCK_SENDING_AFTER
+    n = Order.objects.filter(status='sending', updated_at__lt=cutoff).update(
+        status='failed', updated_at=timezone.now(),
+        whatsapp_response_json={'error': 'Send interrupted; check WhatsApp before resending'})
+    if n:
+        logger.warning(f"Marked {n} orders stuck in 'sending' as failed")
+    return n

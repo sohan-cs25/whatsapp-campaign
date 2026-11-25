@@ -115,7 +115,10 @@ class OrderWhatsAppService:
         qty = None
         if line.product is not None and line.quantity is not None:
             qty = to_price_unit(line.quantity, line.unit or None, line.product.price_unit)
-        if qty is not None and qty >= 1 and qty == qty.to_integral_value():
+        # Split into quantity x unit price only when that reproduces the stored line total; the
+        # product's price unit may have changed since the line was priced.
+        if (qty is not None and qty >= 1 and qty == qty.to_integral_value()
+                and int(qty) * line.unit_price_paise == line.line_total_paise):
             name, quantity, value = line.name, int(qty), line.unit_price_paise
         else:
             suffix = f" ({_fmt_qty(line.quantity)} {line.unit})".rstrip() if line.quantity is not None else ""

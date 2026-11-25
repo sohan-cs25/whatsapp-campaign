@@ -208,12 +208,17 @@ def send_whatsapp_message(self, message_id):
     Send a single WhatsApp message using 360dialog
     """
     try:
-        message = Message.objects.get(id=message_id)
-        
-        # Skip if already sent
-        if message.status != 'queued':
-            logger.info(f"Message {message_id} already processed, status: {message.status}")
+        # Claim the message atomically: queued -> sending, only while its campaign is running.
+        # A message can have more than one task (pre-scheduled, resumed campaign, retries);
+        # only the task that wins this update sends, so a message is never sent twice.
+        # Messages of a paused campaign stay queued and are scheduled again on resume.
+        claimed = Message.objects.filter(
+            id=message_id, status='queued', campaign__status='running'
+        ).update(status='sending')
+        if not claimed:
+            logger.info(f"Message {message_id} not claimable (already handled or campaign not running)")
             return
+        message = Message.objects.select_related('campaign').get(id=message_id)
         
         # # Apply rate limiting
         # limiter = SimpleRateLimiter(message.campaign_id)
@@ -232,10 +237,6 @@ def send_whatsapp_message(self, message_id):
 
         # Simple rate limiting - wait 1 second between messages
         time.sleep(1)
-        
-        # Update status to sending
-        message.status = 'sending'
-        message.save()
         
         # Initialize WhatsApp client
         client = WhatsApp360Client()

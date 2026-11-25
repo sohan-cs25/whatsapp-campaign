@@ -125,15 +125,20 @@ class CampaignViewSet(viewsets.ModelViewSet):
                 'error': 'No valid recipients found. Please upload a file first.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Mark running atomically before scheduling: sends only go out for running campaigns,
+        # and a second concurrent click finds the status already changed and stops here.
+        started = Campaign.objects.filter(id=campaign.id, status__in=['pending', 'paused']).update(
+            status='running', started_at=timezone.now())
+        if not started:
+            return Response({
+                'success': False,
+                'error': 'Campaign was already started'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        campaign.refresh_from_db()
+
         # Import task here to avoid circular import
         from .tasks import start_campaign_task
-        
-        # Start campaign asynchronously
         start_campaign_task.delay(campaign.id)
-        
-        campaign.status = 'running'
-        campaign.started_at = timezone.now()
-        campaign.save()
         
         logger.info(f"Campaign started: {campaign.id}")
         
@@ -180,13 +185,19 @@ class CampaignViewSet(viewsets.ModelViewSet):
                 'error': 'Can only resume paused campaigns'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        campaign.status = 'running'
-        campaign.save()
-        
+        resumed = Campaign.objects.filter(id=campaign.id, status='paused').update(status='running')
+        if not resumed:
+            return Response({
+                'success': False,
+                'error': 'Campaign was already resumed'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        campaign.refresh_from_db()
+
         # Import task here to avoid circular import
         from .tasks import start_campaign_task
-        
-        # Resume sending messages
+
+        # Resume sending messages (tasks still pending from before the pause are harmless:
+        # each message is claimed by exactly one task)
         start_campaign_task.delay(campaign.id)
         
         logger.info(f"Campaign resumed: {campaign.id}")

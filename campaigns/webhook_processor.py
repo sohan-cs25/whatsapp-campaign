@@ -104,10 +104,8 @@ def process_campaign_webhook_status(payload, status_update, message):
             else:
                 logger.info(f"Message {message_id} already delivered/read, skipping duplicate webhook")
 
-            # Import and trigger next message
-            from .tasks import send_next_message
-            logger.info(f"Message delivered to {message.phone_number}, triggering next message")
-            send_next_message.delay(message.campaign_id)
+            # No send is triggered here: start_campaign_task already scheduled every message.
+            # (Triggering send_next_message here sent queued messages a second time.)
 
         elif status == 'read':
             # Only update if message is not already read

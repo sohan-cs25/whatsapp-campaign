@@ -59,7 +59,7 @@ class ParsedChatFileListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ParsedChatFile
         fields = [
-            'id', 'chatfile_filename', 'file_name', 'processed_at',
+            'id', 'chatfile', 'chatfile_filename', 'file_name', 'processed_at',
             'total_messages', 'total_orders', 'total_queries', 'downloaded_at'
         ]
 

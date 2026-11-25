@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Dict, List, Any, Tuple
 from django.utils import timezone
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,16 @@ class OrderWhatsAppService:
         """
         try:
             logger.info(f"Sending order message for {order.order_id} to {order.number}")
+
+            # Test environments set this so only their own phones can receive messages.
+            allowlist = getattr(settings, 'ORDERS_SEND_ALLOWLIST', None)
+            if allowlist is not None and order.number not in allowlist:
+                order.status = 'failed'
+                order.whatsapp_response_json = {
+                    'error': f'{order.number} is not in ORDERS_SEND_ALLOWLIST; message not sent'}
+                order.save()
+                logger.warning(f"Order {order.order_id}: {order.number} not in ORDERS_SEND_ALLOWLIST")
+                return {'success': False, 'error': 'number not in ORDERS_SEND_ALLOWLIST'}
 
             # Build the payload
             payload = self.build_order_details_payload(order)

@@ -135,3 +135,14 @@ class ProductRowChangedTests(TestCase):
         assert product_row_changed(old, dict(same, price="125.0"))
         assert product_row_changed(old, dict(same, is_active=False))
         assert product_row_changed(old, dict(same, name="Kesar"))
+
+
+class ProcessedFileListTests(APITestCase):
+    def test_list_includes_chatfile_id(self):
+        """The Streamlit extract page finds its processed file by chatfile id."""
+        user = make_user()
+        self.client.force_authenticate(user)
+        pf = make_parsed_file(user)
+        r = self.client.get("/api/orders/processed-files/")
+        assert r.status_code == 200
+        assert r.data["results"][0]["chatfile"] == pf.chatfile_id

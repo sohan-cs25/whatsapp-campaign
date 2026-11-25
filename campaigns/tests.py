@@ -101,3 +101,78 @@ class StartResumeTests(APITestCase):
 
     def test_resume_marks_running_before_scheduling_and_only_once(self):
         self.assert_running_before_scheduling("resume", "paused")
+
+
+REJECTED = {"success": False, "error": "(#131026) Message undeliverable", "status_code": 400, "rejected": True}
+TIMEOUT = {"success": False, "error": "Request timeout", "status_code": 408}
+
+
+class RetryOnceTests(TestCase):
+    """A message 360dialog rejected is retried once; anything where the message may have
+    gone out (timeout, network error) is not retried, to avoid duplicates."""
+
+    def setUp(self):
+        p = patch("campaigns.tasks.WhatsApp360Client")
+        self.send = p.start().return_value.send_template_message
+        self.addCleanup(p.stop)
+        for target in ("campaigns.tasks.check_campaign_completion", "campaigns.tasks.time.sleep"):
+            q = patch(target)
+            q.start()
+            self.addCleanup(q.stop)
+        self.campaign, (self.msg,) = make_campaign()
+
+    def run_task(self):
+        """Run one attempt; returns True if it asked Celery for a retry."""
+        from celery.exceptions import Retry
+        with patch.object(tasks.send_whatsapp_message, "retry", side_effect=Retry()) as retry:
+            try:
+                tasks.send_whatsapp_message(self.msg.id)
+            except Retry:
+                pass
+        self.msg.refresh_from_db()
+        self.retry_calls = retry.call_count
+        return retry.call_count > 0
+
+    def test_rejected_then_ok_sends_on_retry(self):
+        self.send.side_effect = [REJECTED, OK]
+        assert self.run_task() and self.retry_calls == 1
+        assert self.msg.status == "queued" and self.msg.retry_count == 1
+        assert not self.run_task()
+        self.campaign.refresh_from_db()
+        assert self.msg.status == "sent" and self.send.call_count == 2 and self.campaign.sent_count == 1
+
+    def test_rejected_twice_fails_without_third_attempt(self):
+        self.send.return_value = REJECTED
+        assert self.run_task()
+        assert not self.run_task()
+        assert self.msg.status == "failed" and self.msg.retry_count == 2
+        assert self.msg.error_message == REJECTED["error"]
+        assert not self.run_task()  # a stray extra task does nothing
+        assert self.send.call_count == 2
+
+    def test_timeout_is_not_retried(self):
+        self.send.return_value = TIMEOUT
+        assert not self.run_task()
+        assert self.msg.status == "failed" and self.send.call_count == 1
+
+
+class ClientRejectedFlagTests(TestCase):
+    def make_client(self):
+        from campaigns.whatsapp_360_client import WhatsApp360Client
+        with patch("campaigns.whatsapp_360_client.config", return_value="k"):
+            return WhatsApp360Client()
+
+    def test_http_error_response_is_rejected(self):
+        c = self.make_client()
+        resp = type("R", (), {"status_code": 400, "json": lambda self: {"error": {"message": "bad"}},
+                              "text": "bad"})()
+        with patch.object(c.session, "post", return_value=resp):
+            r = c.send_template_message("919800000001", "promo")
+        assert r["success"] is False and r.get("rejected") is True
+
+    def test_timeout_is_not_rejected(self):
+        import requests
+        c = self.make_client()
+        with patch.object(c.session, "post", side_effect=requests.exceptions.Timeout()):
+            r = c.send_template_message("919800000001", "promo")
+        assert r["success"] is False and not r.get("rejected")

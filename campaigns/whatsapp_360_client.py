@@ -92,7 +92,10 @@ class WhatsApp360Client:
                     'success': False,
                     'error': response_data.get('error', {}).get('message', 'Unknown error'),
                     'status_code': response.status_code,
-                    'response': response_data
+                    'response': response_data,
+                    # 360dialog answered and refused the message, so it was not sent and a
+                    # retry cannot duplicate it (unlike a timeout or network error).
+                    'rejected': True,
                 }
                 
         except requests.exceptions.Timeout:

@@ -1,5 +1,6 @@
 
 from celery import shared_task
+from celery.exceptions import Retry
 from django.utils import timezone
 from django.db import models
 import pandas as pd
@@ -202,6 +203,10 @@ def start_campaign_task(campaign_id):
         logger.error(f"Campaign {campaign_id} not found")
         raise
 
+MAX_SEND_ATTEMPTS = 2       # first send + one retry
+RETRY_DELAY_SECONDS = 60
+
+
 @shared_task(bind=True, max_retries=3)
 def send_whatsapp_message(self, message_id):
     """
@@ -279,27 +284,29 @@ def send_whatsapp_message(self, message_id):
             check_campaign_completion.delay(message.campaign_id)
             
         else:
-            # Failed to send
-            message.status = 'failed'
-            message.failed_at = timezone.now()
             message.error_message = result.get('error', 'Unknown error')
             message.response_code = result.get('status_code', 500)
             message.response_json = result
             message.retry_count += 1
+
+            # Retry once, and only when 360dialog refused the message: after a timeout or
+            # network error it may have been delivered, and a retry would send it twice.
+            if result.get('rejected') and message.retry_count < MAX_SEND_ATTEMPTS:
+                message.status = 'queued'  # the retry claims it like any other send
+                message.save()
+                logger.info(f"Message {message_id} rejected; retrying in {RETRY_DELAY_SECONDS}s")
+                raise self.retry(countdown=RETRY_DELAY_SECONDS)
+
+            message.status = 'failed'
+            message.failed_at = timezone.now()
             message.save()
-            
             # Don't increment failed_count here - let webhook processor handle it
             # when we receive actual failure confirmation from WhatsApp
-            
-            # Retry if under max retries
-            if message.retry_count < 3:
-                logger.info(f"Retrying message {message_id}, attempt {message.retry_count}")
-                raise self.retry(countdown=60 * message.retry_count)  # Exponential backoff
-            else:
-                # Max retries reached, check campaign completion
-                logger.error(f"Max retries reached for message {message_id}")
-                check_campaign_completion.delay(message.campaign_id)
-        
+            logger.error(f"Message {message_id} failed after {message.retry_count} attempt(s)")
+            check_campaign_completion.delay(message.campaign_id)
+
+    except Retry:
+        raise
     except Message.DoesNotExist:
         logger.error(f"Message {message_id} not found")
     except Exception as e:

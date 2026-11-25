@@ -8,6 +8,37 @@ from django.utils import timezone
 import uuid
 from .storage import OrdersFileStorage
 
+from .order_extractor import UNITS
+
+UNIT_CHOICES = [(u, u) for u in UNITS]
+
+
+class Product(models.Model):
+    """Products on sale and their prices: the single source of truth for pricing."""
+    key = models.SlugField(max_length=64, unique=True, help_text="snake_case id the AI maps items to")
+    name = models.CharField(max_length=120)
+    price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price in rupees per price_unit")
+    price_unit = models.CharField(max_length=10, choices=UNIT_CHOICES)
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'products'
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} (₹{self.price}/{self.price_unit})"
+
+    @classmethod
+    def as_catalog(cls):
+        """Active products in the catalog format order_extractor expects."""
+        return [
+            {"id": p.key, "name": p.name, "price": float(p.price), "price_per": p.price_unit,
+             "first_announced_id": "", "notes": None}
+            for p in cls.objects.filter(is_active=True)
+        ]
+
+
 class ChatFile(models.Model):
     """
     Stores uploaded WhatsApp chat files (.txt format)

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import ChatFile, ParsedChatFile, ValidatedFile, Order, WebhookEvent
+from .models import ChatFile, ParsedChatFile, ValidatedFile, Order, WebhookEvent, Product
 
 
 @admin.register(ChatFile)
@@ -203,3 +203,10 @@ class WebhookEventAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('order')
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    list_display = ['name', 'key', 'price', 'price_unit', 'is_active', 'updated_at']
+    list_filter = ['is_active', 'price_unit']
+    search_fields = ['name', 'key']

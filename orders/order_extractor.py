@@ -376,7 +376,7 @@ def extract_orders(msgs: List[Dict], catalog: List[Dict], llm, cfg: ExtractConfi
     catalog_txt = "\n".join(
         f"- {p['id']}: {p['name']}"
         + (f" (Rs {p['price']} per {p['price_per']})" if p.get("price") else "")
-        + f" — first announced {p['first_announced_id']}"
+        + (f" — first announced {p['first_announced_id']}" if p.get("first_announced_id") else "")
         + (f" — {p['notes']}" if p.get("notes") else "")
         for p in catalog
     ) or "(no announced products)"
@@ -459,6 +459,19 @@ def postprocess(result: Dict, catalog: List[Dict], msgs: List[Dict]) -> pd.DataF
             flags.append("no_address")
         first = by_id[o["message_ids"][0]]
 
+        if not o.get("items"):
+            # e.g. "cancel my order": keep it so a reviewer sees it
+            item_flags = sorted(set(flags + ["no_items"]))
+            rows.append({
+                "date": first["date"], "time": first["time"], "sender": o["sender"],
+                "address": addr, "phone": o.get("phone"),
+                "product": None, "product_id": None, "in_catalog": False, "as_written": None,
+                "quantity": None, "unit": None, "base_qty": None, "base_unit": None,
+                "kind": o.get("kind"), "message_ids": ",".join(o["message_ids"]),
+                "flags": ",".join(item_flags), "needs_review": True,
+            })
+            continue
+
         for it in o.get("items", []):
             pid = it.get("product_id")
             item_flags = list(flags)
@@ -479,7 +492,7 @@ def postprocess(result: Dict, catalog: List[Dict], msgs: List[Dict]) -> pd.DataF
             rows.append({
                 "date": first["date"], "time": first["time"], "sender": o["sender"],
                 "address": addr, "phone": o.get("phone"),
-                "product": product, "in_catalog": in_catalog, "as_written": it.get("as_written"),
+                "product": product, "product_id": pid if in_catalog else None, "in_catalog": in_catalog, "as_written": it.get("as_written"),
                 "quantity": qty, "unit": unit,
                 "base_qty": sign * qty * mult if qty is not None else None, "base_unit": base_unit,
                 "kind": o.get("kind"), "message_ids": ",".join(o["message_ids"]),
@@ -502,13 +515,15 @@ def totals(df: pd.DataFrame) -> pd.DataFrame:
 # 6. One-call entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run(msgs: List[Dict], llm, sellers: set, cfg: Optional[ExtractConfig] = None, on_progress=None):
+def run(msgs: List[Dict], llm, sellers: set, cfg: Optional[ExtractConfig] = None, on_progress=None,
+        catalog: Optional[List[Dict]] = None):
+    """catalog: optional pre-built catalog (e.g. from the Product table); skips the LLM catalog pass."""
     cfg = cfg or ExtractConfig()
     cfg.sellers = set(sellers)
     if not msgs:  # nothing to extract — don't call the LLM
         empty = postprocess({"orders": [], "labels": {}}, [], [])
         return {"catalog": [], "orders": empty, "totals": empty, "labels": {}}
-    catalog = build_catalog(msgs, cfg.sellers, llm)
+    catalog = catalog or build_catalog(msgs, cfg.sellers, llm)
     result = extract_orders(msgs, catalog, llm, cfg, on_progress)
     df = postprocess(result, catalog, msgs)
     return {"catalog": catalog, "orders": df, "totals": totals(df), "labels": result["labels"]}
@@ -522,7 +537,9 @@ def per_message_rows(msgs: List[Dict], run_out: Dict) -> List[Dict]:
     items_of, addr_of = defaultdict(list), {}
     for _, r in df.iterrows():
         mid = r["message_ids"].split(",")[0]
-        items_of[mid].append(f"{r['product']}: {r['quantity']:g} {r['unit']}" if r["quantity"] is not None
+        if r["product"] is None:
+            continue  # item-less order (e.g. a bare cancellation)
+        items_of[mid].append(f"{r['product']}: {r['quantity']:g} {r['unit']}" if pd.notna(r["quantity"])
                              else r["product"])
         addr_of[mid] = r["address"] or ""
     rows = []

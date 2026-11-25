@@ -62,7 +62,7 @@ def process_chat_file(self, chat_file_id):
         logger.info("Step 2: AI classification (this may take time due to rate limits)...")
 
         # Use the new synchronous wrapper that handles async/sync compatibility
-        processed_messages, stats = django_ai_service.process_chat_messages_sync(
+        processed_messages, stats, run_result = django_ai_service.process_chat_messages_sync(
             messages=messages,
             chat_file_id=str(chat_file.id)
         )

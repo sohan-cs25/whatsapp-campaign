@@ -21,7 +21,7 @@ from django.utils import timezone
 from asgiref.sync import sync_to_async
 
 from .schemas import MessageClassification, MessageType, ProcessingStats
-from .models import ChatFile, ParsedChatFile
+from .models import ChatFile, ParsedChatFile, Product
 from .utils import save_processed_chat_to_excel
 from . import order_extractor as ox
 
@@ -32,10 +32,7 @@ class DjangoOrderExtractionService:
     """Django-compatible wrapper around order_extractor.run()"""
 
     def __init__(self):
-        self.llm = ox.get_llm(
-            provider=getattr(settings, "LLM_PROVIDER", None),
-            model=getattr(settings, "LLM_MODEL", None),
-        )
+        self._llm = None  # created on first use, so importing this module needs no API key
         self.default_sellers = set(getattr(settings, "CHAT_SELLER_NAMES", None) or
                                    os.getenv("CHAT_SELLER_NAMES", "Aj").split("|"))
         # used by the legacy helpers below
@@ -43,8 +40,17 @@ class DjangoOrderExtractionService:
         self.max_delay = 120.0
         self.jitter_range = 0.1
 
+    @property
+    def llm(self):
+        if self._llm is None:
+            self._llm = ox.get_llm(
+                provider=getattr(settings, "LLM_PROVIDER", None),
+                model=getattr(settings, "LLM_MODEL", None),
+            )
+        return self._llm
+
     # ─────────────────────────────────────────────────────────────
-    # Main entry point for Celery (same signature as before)
+    # Main entry point for Celery
     # ─────────────────────────────────────────────────────────────
 
     def process_chat_messages_sync(
@@ -53,9 +59,9 @@ class DjangoOrderExtractionService:
         chat_file_id: str,
         progress_callback=None,
         sellers: Optional[set] = None,
-    ) -> Tuple[List[Dict], ProcessingStats]:
+    ) -> Tuple[List[Dict], ProcessingStats, Dict]:
         """messages: rows with 'Date', 'Time', 'Phone/Name', 'Message'.
-        Returns one processed row per input row (Message_Type, Items, Total_Amount, Notes)."""
+        Returns (one processed row per input row, stats, the order_extractor.run() result)."""
         start_time = time.time()
         total = len(messages)
         sellers = set(sellers or self.default_sellers)
@@ -68,7 +74,8 @@ class DjangoOrderExtractionService:
                 done = int(total * done_chunks / n_chunks)
                 progress_callback(int(done_chunks / n_chunks * 100), done, total)
 
-        result = ox.run(msgs, self.llm, sellers, on_progress=on_progress)
+        result = ox.run(msgs, self.llm, sellers, on_progress=on_progress,
+                        catalog=Product.as_catalog() or None)
         print(f"[AI] Catalog: {[p['name'] for p in result['catalog']]}")
 
         # Map results back onto EVERY input row, including media/deleted rows
@@ -93,13 +100,9 @@ class DjangoOrderExtractionService:
             processing_time=processing_time,
             success_rate=1.0 if total else 0,
         )
-        # Full order table (one row per item, with address and review flags) and totals
-        # are also available if you want to save them:
-        self.last_result = result
-
         print(f"[AI] Complete. {total} messages, {orders_found} orders in {processing_time:.1f}s")
         print(f"[AI] Type breakdown: {message_types}")
-        return processed_messages, stats
+        return processed_messages, stats, result
 
     # ─────────────────────────────────────────────────────────────
     # Legacy async method — kept for compatibility

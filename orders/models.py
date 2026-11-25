@@ -5,6 +5,8 @@ from django.db import models
 
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.db import IntegrityError, transaction
+import re
 import uuid
 from .storage import OrdersFileStorage
 
@@ -143,6 +145,7 @@ class Order(models.Model):
     """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('sending', 'Sending'),
         ('sent', 'Message Sent'),
         ('failed', 'Send Failed'),
         ('delivered', 'Message Delivered'),
@@ -157,12 +160,30 @@ class Order(models.Model):
         ('cancelled', 'Payment Cancelled'),
     ]
     
+    REVIEW_STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    validated_file = models.ForeignKey(ValidatedFile, on_delete=models.CASCADE, related_name='orders')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders', null=True)
+    validated_file = models.ForeignKey(ValidatedFile, on_delete=models.CASCADE, related_name='orders',
+                                       null=True, blank=True)
+    parsed_file = models.ForeignKey(ParsedChatFile, on_delete=models.SET_NULL, related_name='orders',
+                                    null=True, blank=True)
+
+    # Review
+    customer_name = models.CharField(max_length=120, blank=True)
+    address = models.CharField(max_length=64, blank=True)
+    review_status = models.CharField(max_length=10, choices=REVIEW_STATUS_CHOICES, default='draft')
+    needs_review = models.BooleanField(default=False)
+    review_flags = models.JSONField(default=list, blank=True)
+    total_paise = models.PositiveIntegerField(null=True, blank=True)
     
     # Customer details
     order_id = models.CharField(max_length=20, unique=True, editable=False, help_text="Auto-generated order ID (format: 2025091500001)")
-    number = models.CharField(max_length=20, help_text="Customer phone number")
+    number = models.CharField(max_length=20, blank=True, help_text="Customer phone number")
     order_items = models.TextField(help_text="Order items: Apples:1,Pears:2")
     amount = models.TextField(help_text="Amount breakdown: 150+200=350")
     
@@ -208,25 +229,96 @@ class Order(models.Model):
         ]
     
     def generate_order_id(self):
-        """Generate date-based order ID: format YYYYMMDD00001"""
-        today = timezone.now()
-        date_prefix = today.strftime('%Y%m%d')  # 20250915
-
-        # Count orders created today
-        daily_count = Order.objects.filter(
-            created_at__date=today.date()
-        ).count() + 1
-
-        return f"{date_prefix}{daily_count:05d}"  # 2025091500001
+        """Date-based order ID YYYYMMDDnnnnn: today's highest suffix + 1 (safe after deletions)."""
+        date_prefix = timezone.now().strftime('%Y%m%d')
+        last = (Order.objects.filter(order_id__startswith=date_prefix)
+                .order_by('-order_id').values_list('order_id', flat=True).first())
+        next_n = int(last[len(date_prefix):]) + 1 if last else 1
+        return f"{date_prefix}{next_n:05d}"
 
     def save(self, *args, **kwargs):
-        """Auto-generate order_id if not set"""
-        if not self.order_id:
+        """Auto-generate order_id if not set; retry on a concurrent collision."""
+        if self.order_id:
+            return super().save(*args, **kwargs)
+        for attempt in range(5):
             self.order_id = self.generate_order_id()
-        super().save(*args, **kwargs)
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                self.order_id = ''
+                if attempt == 4:
+                    raise
+                kwargs.pop('force_insert', None)
+
+    def refresh_totals(self):
+        """Recompute total_paise from lines and refill the legacy order_items/amount strings."""
+        lines = list(self.lines.all())
+        self.total_paise = sum(l.line_total_paise for l in lines)
+        self.order_items = ", ".join(
+            f"{l.name}: {_fmt_qty(l.quantity)} {l.unit}".strip() if l.quantity is not None else l.name
+            for l in lines)
+        self.amount = ("+".join(_rupees(l.line_total_paise) for l in lines) + "=" + _rupees(self.total_paise)
+                       if lines else "")
+        self.save()
+
+    def blocking_issues(self):
+        """Reasons this order cannot be approved, in a fixed order."""
+        issues = []
+        lines = list(self.lines.all())
+        if not re.fullmatch(r"\d{10,15}", self.number or ""):
+            issues.append("no_phone")
+        if not lines:
+            issues.append("no_lines")
+        if not self.total_paise:
+            issues.append("zero_total")
+        if any(l.line_total_paise == 0 for l in lines):
+            issues.append("unpriced_line")
+        return issues
 
     def __str__(self):
         return f"Order {self.order_id} - {self.number} - {self.amount} - {self.status}"
+
+def _fmt_qty(q):
+    return format(q.normalize(), 'f') if q is not None else ""
+
+
+def _rupees(paise):
+    paise = paise or 0
+    return str(paise // 100) if paise % 100 == 0 else f"{paise / 100:.2f}"
+
+
+PRICING_FLAGS = {"unknown_product", "unit_mismatch", "missing_quantity"}
+
+
+class OrderLine(models.Model):
+    """One priced item of an Order."""
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True)
+    name = models.CharField(max_length=120)
+    quantity = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    unit = models.CharField(max_length=10, blank=True)
+    unit_price_paise = models.PositiveIntegerField(default=0)
+    line_total_paise = models.PositiveIntegerField(default=0)
+    as_written = models.TextField(blank=True)
+    message_ids = models.CharField(max_length=255, blank=True)
+    flags = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = 'order_lines'
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.name} {self.quantity} {self.unit}"
+
+    def reprice(self):
+        """Set price fields and pricing flags from the product; keeps non-pricing flags. Does not save."""
+        from .pricing import price_line
+        priced = price_line(self.product, self.quantity, self.unit or None)
+        self.unit_price_paise = priced.unit_price_paise
+        self.line_total_paise = priced.line_total_paise
+        self.flags = [f for f in (self.flags or []) if f not in PRICING_FLAGS] + priced.flags
+
 
 class WebhookEvent(models.Model):
     """

@@ -341,7 +341,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        queryset = Order.objects.filter(validated_file__user=self.request.user)
+        queryset = Order.objects.filter(user=self.request.user)
 
         # Filter by validated file ID if provided
         validated_file_id = self.request.query_params.get('validated_file')
@@ -581,8 +581,8 @@ def processing_stats(request):
         'total_files_uploaded': ChatFile.objects.filter(user=user).count(),
         'total_files_processed': ParsedChatFile.objects.filter(user=user).count(),
         'total_files_validated': ValidatedFile.objects.filter(user=user).count(),
-        'total_orders_extracted': Order.objects.filter(validated_file__user=user).count(),
-        'total_messages_sent': Order.objects.filter(validated_file__user=user, status__in=['sent', 'delivered', 'read']).count(),
+        'total_orders_extracted': Order.objects.filter(user=user).count(),
+        'total_messages_sent': Order.objects.filter(user=user, status__in=['sent', 'delivered', 'read']).count(),
     }
 
     # Calculate processing success rate
@@ -604,25 +604,25 @@ def analytics_dashboard(request):
     user = request.user
 
     # Overall statistics
-    total_orders = Order.objects.filter(validated_file__user=user).count()
+    total_orders = Order.objects.filter(user=user).count()
     total_files = ValidatedFile.objects.filter(user=user).count()
 
     # Message status breakdown
     message_stats = {
         'total_orders': total_orders,
-        'sent': Order.objects.filter(validated_file__user=user, status='sent').count(),
-        'delivered': Order.objects.filter(validated_file__user=user, status='delivered').count(),
-        'read': Order.objects.filter(validated_file__user=user, status='read').count(),
-        'failed': Order.objects.filter(validated_file__user=user, status='failed').count(),
-        'pending': Order.objects.filter(validated_file__user=user, status='pending').count(),
+        'sent': Order.objects.filter(user=user, status='sent').count(),
+        'delivered': Order.objects.filter(user=user, status='delivered').count(),
+        'read': Order.objects.filter(user=user, status='read').count(),
+        'failed': Order.objects.filter(user=user, status='failed').count(),
+        'pending': Order.objects.filter(user=user, status='pending').count(),
     }
 
     # Payment statistics
     payment_stats = {
-        'completed': Order.objects.filter(validated_file__user=user, payment_status='completed').count(),
-        'pending': Order.objects.filter(validated_file__user=user, payment_status='pending').count(),
-        'failed': Order.objects.filter(validated_file__user=user, payment_status='failed').count(),
-        'initiated': Order.objects.filter(validated_file__user=user, payment_status='initiated').count(),
+        'completed': Order.objects.filter(user=user, payment_status='completed').count(),
+        'pending': Order.objects.filter(user=user, payment_status='pending').count(),
+        'failed': Order.objects.filter(user=user, payment_status='failed').count(),
+        'initiated': Order.objects.filter(user=user, payment_status='initiated').count(),
     }
 
     # Calculate conversion rates
@@ -632,7 +632,7 @@ def analytics_dashboard(request):
 
     # Revenue calculation
     total_revenue = Order.objects.filter(
-        validated_file__user=user,
+        user=user,
         payment_status='completed'
     ).aggregate(
         total=Sum('payment_amount_captured')
@@ -666,7 +666,7 @@ def analytics_dashboard(request):
 
     # Recent activity (last 10 orders)
     recent_orders = Order.objects.filter(
-        validated_file__user=user
+        user=user
     ).select_related('validated_file').order_by('-updated_at')[:10]
 
     recent_activity = []
@@ -878,7 +878,7 @@ def resend_payment_success_message(request, order_id):
         try:
             order = Order.objects.get(
                 id=order_id,
-                validated_file__user=request.user
+                user=request.user
             )
         except Order.DoesNotExist:
             return Response({

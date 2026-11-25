@@ -484,6 +484,8 @@ def extract_orders_from_validated_file_sync(validated_file: ValidatedFile) -> Li
 
                 order = Order.objects.create(
                 validated_file=validated_file,
+                user=validated_file.user,
+                review_status='approved',
                 number=phone_number,
                 order_items=order_items_str,
                 amount=final_amount,
@@ -542,7 +544,7 @@ def get_file_processing_status(user, file_type: str = 'all') -> Dict:
         }
 
         # Order statistics
-        orders = Order.objects.filter(validated_file__user=user)
+        orders = Order.objects.filter(user=user)
         status['orders'] = {
             'total': orders.count(),
             'pending': orders.filter(status='pending').count(),

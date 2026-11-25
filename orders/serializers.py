@@ -102,7 +102,7 @@ class ValidatedFileListSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     """Serializer for Order model"""
 
-    validated_file_name = serializers.CharField(source='validated_file.file_name', read_only=True)
+    validated_file_name = serializers.CharField(source='validated_file.file_name', read_only=True, default=None)
 
     class Meta:
         model = Order
@@ -115,7 +115,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'validated_file_name', 'sent_at', 'message_id', 'response_code',
+            'id', 'validated_file', 'validated_file_name', 'sent_at', 'message_id', 'response_code',
             'response_json', 'delivered_at', 'read_at', 'payment_success_message_sent',
             'payment_success_message_id', 'payment_success_sent_at', 'payment_success_message_status',
             'created_at', 'updated_at'

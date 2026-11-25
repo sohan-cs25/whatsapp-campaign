@@ -11,6 +11,7 @@ from .views import (
     send_order_messages,
     resend_payment_success_message
 )
+from .review_views import review_orders, update_review_order, approve_orders, send_approved_orders
 
 app_name = 'orders'
 
@@ -22,6 +23,12 @@ router.register(r'validated-files', ValidatedFileViewSet, basename='validatedfil
 router.register(r'orders', OrderViewSet, basename='order')
 
 urlpatterns = [
+    # Review flow (before the router so 'review/...' is matched first)
+    path('review/orders/<uuid:order_id>/', update_review_order, name='review-order-update'),
+    path('review/<uuid:parsed_file_id>/', review_orders, name='review-orders'),
+    path('review/<uuid:parsed_file_id>/approve/', approve_orders, name='review-approve'),
+    path('review/<uuid:parsed_file_id>/send/', send_approved_orders, name='review-send'),
+
     # ViewSet URLs
     path('', include(router.urls)),
 

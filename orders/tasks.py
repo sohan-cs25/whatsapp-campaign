@@ -366,3 +366,8 @@ def cleanup_old_files():
             'success': False,
             'error': error_msg
         }
+
+@shared_task
+def send_order_batch(parsed_file_id):
+    """Queue approved orders of a processed chat file for sending. Implemented in the sending task."""
+    raise NotImplementedError

@@ -166,3 +166,59 @@ class ProcessingStatsSerializer(serializers.Serializer):
     total_orders_extracted = serializers.IntegerField()
     total_messages_sent = serializers.IntegerField()
     processing_success_rate = serializers.FloatField()
+
+# ── Review flow ─────────────────────────────────────────────────────────────
+
+from .models import OrderLine, Product, UNITS  # noqa: E402
+
+
+class OrderLineSerializer(serializers.ModelSerializer):
+    product = serializers.SlugRelatedField(slug_field='key', read_only=True)
+
+    class Meta:
+        model = OrderLine
+        fields = ['id', 'product', 'name', 'quantity', 'unit', 'unit_price_paise', 'line_total_paise',
+                  'as_written', 'flags']
+
+
+class ReviewOrderSerializer(serializers.ModelSerializer):
+    lines = OrderLineSerializer(many=True, read_only=True)
+    blocking_issues = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = ['id', 'order_id', 'customer_name', 'number', 'address', 'review_status', 'needs_review',
+                  'review_flags', 'blocking_issues', 'total_paise', 'status', 'payment_status', 'lines']
+
+    def get_blocking_issues(self, obj):
+        return obj.blocking_issues()
+
+
+class LineInputSerializer(serializers.Serializer):
+    product = serializers.CharField(allow_null=True, required=False)
+    name = serializers.CharField(max_length=120)
+    quantity = serializers.DecimalField(max_digits=10, decimal_places=3, allow_null=True, required=False)
+    unit = serializers.ChoiceField(choices=UNITS + [''], allow_blank=True, required=False, default='')
+
+    def validate_product(self, key):
+        if key in (None, ''):
+            return None
+        try:
+            return Product.objects.get(key=key)
+        except Product.DoesNotExist:
+            raise serializers.ValidationError(f"Unknown product '{key}'")
+
+
+class ReviewOrderUpdateSerializer(serializers.Serializer):
+    number = serializers.CharField(max_length=20, allow_blank=True, required=False)
+    address = serializers.CharField(max_length=64, allow_blank=True, required=False)
+    customer_name = serializers.CharField(max_length=120, allow_blank=True, required=False)
+    review_status = serializers.ChoiceField(choices=['draft', 'rejected'], required=False)
+    lines = LineInputSerializer(many=True, required=False)
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['id', 'key', 'name', 'price', 'price_unit', 'is_active', 'updated_at']
+        read_only_fields = ['id', 'updated_at']

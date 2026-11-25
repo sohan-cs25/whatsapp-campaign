@@ -549,7 +549,7 @@ def get_file_processing_status(user, file_type: str = 'all') -> Dict:
         }
 
         # Order statistics
-        orders = Order.objects.filter(user=user)
+        orders = Order.objects.for_user(user)
         status['orders'] = {
             'total': orders.count(),
             'pending': orders.filter(status='pending').count(),

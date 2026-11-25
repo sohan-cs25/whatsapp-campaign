@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 
 # Create your models here.
 # Simple Orders App Models with local file storage structure
@@ -139,6 +140,13 @@ class ValidatedFile(models.Model):
     def __str__(self):
         return f"Validated: {self.file_name}"
 
+class OrderQuerySet(models.QuerySet):
+    def for_user(self, user):
+        """Orders owned by user. Falls back to the validated file's owner for orders that
+        predate Order.user (so a migration without the backfill does not hide them)."""
+        return self.filter(Q(user=user) | Q(user__isnull=True, validated_file__user=user))
+
+
 class Order(models.Model):
     """
     Individual customer orders extracted from validated files
@@ -228,6 +236,8 @@ class Order(models.Model):
             models.Index(fields=['payment_status']),
         ]
     
+    objects = OrderQuerySet.as_manager()
+
     def generate_order_id(self):
         """Date-based order ID YYYYMMDDnnnnn: today's highest suffix + 1 (safe after deletions)."""
         date_prefix = timezone.now().strftime('%Y%m%d')

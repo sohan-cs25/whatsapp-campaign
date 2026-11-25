@@ -87,14 +87,17 @@ def process_chat_file(self, chat_file_id):
             raise Exception("Failed to save processed Excel file")
 
         # Step 4: Create ParsedChatFile record
-        parsed_file = ParsedChatFile.objects.create(
-            user=chat_file.user,
+        # update_or_create: a retry after a later step failed must not hit the one-to-one constraint
+        parsed_file, _ = ParsedChatFile.objects.update_or_create(
             chatfile=chat_file,
-            file_name=output_filename,
-            processed_file_path=f"processedchatfile/{output_filename}",
-            total_messages=stats.total_messages,
-            total_orders=stats.orders_found,
-            total_queries=stats.message_types.get('enquiry', 0)
+            defaults=dict(
+                user=chat_file.user,
+                file_name=output_filename,
+                processed_file_path=f"processedchatfile/{output_filename}",
+                total_messages=stats.total_messages,
+                total_orders=stats.orders_found,
+                total_queries=stats.message_types.get('enquiry', 0),
+            ),
         )
 
         # Step 5: One priced order per customer, ready for review in the app

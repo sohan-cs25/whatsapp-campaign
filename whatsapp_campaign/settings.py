@@ -222,6 +222,16 @@ WHATSAPP_CONFIG = {
     'WEBHOOK_URL': config('WHATSAPP_360_WEBHOOK_URL', default=''),
 }
 
+# Webhook authentication (campaigns/webhook_handler.py). Every check that is set must pass.
+# x-360dialog-signature: HMAC-SHA256 of the raw body with your 360dialog platform secret
+WHATSAPP_WEBHOOK_SIGNING_SECRET = config('WHATSAPP_WEBHOOK_SIGNING_SECRET', default='')
+# Exact Authorization header 360dialog sends; register it with `manage.py configure_whatsapp_webhook`
+WHATSAPP_WEBHOOK_AUTH_HEADER = config('WHATSAPP_WEBHOOK_AUTH_HEADER', default='')
+# With neither of the above set, webhooks are refused unless this is True (not for production)
+WHATSAPP_WEBHOOK_ALLOW_UNAUTHENTICATED = config('WHATSAPP_WEBHOOK_ALLOW_UNAUTHENTICATED', default=False, cast=bool)
+# Meta-style GET hub.verify_token handshake; empty refuses every verification attempt
+WHATSAPP_WEBHOOK_VERIFY_TOKEN = config('WHATSAPP_WEBHOOK_VERIFY_TOKEN', default='')
+
 # Groq AI Configuration for Orders App
 GROQ_API_KEY = config('GROQ_API_KEY', default='')
 

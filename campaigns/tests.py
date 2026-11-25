@@ -176,3 +176,149 @@ class ClientRejectedFlagTests(TestCase):
         with patch.object(c.session, "post", side_effect=requests.exceptions.Timeout()):
             r = c.send_template_message("919800000001", "promo")
         assert r["success"] is False and not r.get("rejected")
+
+
+import hashlib
+import hmac
+import json as _json
+
+from django.test import override_settings
+
+WEBHOOK_URLS = ["/webhook/whatsapp/", "/api/webhook/whatsapp/"]
+BODY = _json.dumps({"statuses": [{"id": "wamid.1", "status": "delivered"}]}).encode()
+
+
+def signature(secret, body=BODY):
+    return hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+@override_settings(WHATSAPP_WEBHOOK_SIGNING_SECRET="", WHATSAPP_WEBHOOK_AUTH_HEADER="",
+                   WHATSAPP_WEBHOOK_ALLOW_UNAUTHENTICATED=False, WHATSAPP_WEBHOOK_VERIFY_TOKEN="")
+class WebhookAuthTests(TestCase):
+    def setUp(self):
+        p = patch("campaigns.tasks.process_unified_webhook_status")
+        self.task = p.start()
+        self.addCleanup(p.stop)
+
+    def post(self, url=WEBHOOK_URLS[0], body=BODY, **headers):
+        return self.client.post(url, data=body, content_type="application/json", **headers)
+
+    def assert_rejected(self, response, code):
+        from campaigns.models import WebhookLog
+        assert response.status_code == code, response.status_code
+        self.task.delay.assert_not_called()
+        assert not WebhookLog.objects.exists()
+
+    # signature (x-360dialog-signature)
+    @override_settings(WHATSAPP_WEBHOOK_SIGNING_SECRET="s3cret")
+    def test_valid_signature_accepted_on_both_urls(self):
+        for url in WEBHOOK_URLS:
+            r = self.post(url, HTTP_X_360DIALOG_SIGNATURE=signature("s3cret"))
+            assert r.status_code == 200, (url, r.status_code)
+        assert self.task.delay.call_count == 2
+
+    @override_settings(WHATSAPP_WEBHOOK_SIGNING_SECRET="s3cret")
+    def test_missing_signature_401(self):
+        self.assert_rejected(self.post(), 401)
+
+    @override_settings(WHATSAPP_WEBHOOK_SIGNING_SECRET="s3cret")
+    def test_wrong_signature_403(self):
+        self.assert_rejected(self.post(HTTP_X_360DIALOG_SIGNATURE=signature("other")), 403)
+
+    @override_settings(WHATSAPP_WEBHOOK_SIGNING_SECRET="s3cret")
+    def test_signature_of_different_body_403(self):
+        sig = signature("s3cret")
+        self.assert_rejected(self.post(body=BODY.replace(b"delivered", b"read"), HTTP_X_360DIALOG_SIGNATURE=sig), 403)
+
+    # shared header (set with POST /v1/configs/webhook "headers")
+    @override_settings(WHATSAPP_WEBHOOK_AUTH_HEADER="Basic dXNlcjpwYXNz")
+    def test_auth_header_accepted(self):
+        assert self.post(HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz").status_code == 200
+
+    @override_settings(WHATSAPP_WEBHOOK_AUTH_HEADER="Basic dXNlcjpwYXNz")
+    def test_wrong_auth_header_401(self):
+        self.assert_rejected(self.post(HTTP_AUTHORIZATION="Basic d3Jvbmc="), 401)
+
+    @override_settings(WHATSAPP_WEBHOOK_AUTH_HEADER="Basic dXNlcjpwYXNz", WHATSAPP_WEBHOOK_SIGNING_SECRET="s3cret")
+    def test_both_configured_both_required(self):
+        self.assert_rejected(self.post(HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz"), 401)
+        r = self.post(HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz", HTTP_X_360DIALOG_SIGNATURE=signature("s3cret"))
+        assert r.status_code == 200
+
+    # nothing configured
+    def test_unconfigured_rejects_by_default(self):
+        self.assert_rejected(self.post(), 401)
+
+    @override_settings(WHATSAPP_WEBHOOK_ALLOW_UNAUTHENTICATED=True)
+    def test_unconfigured_allowed_only_when_opted_in(self):
+        assert self.post().status_code == 200
+
+    # GET verification handshake
+    @override_settings(WHATSAPP_WEBHOOK_VERIFY_TOKEN="tok-123")
+    def test_verify_token_echoes_challenge(self):
+        r = self.client.get(WEBHOOK_URLS[0], {"hub.mode": "subscribe", "hub.verify_token": "tok-123",
+                                              "hub.challenge": "42"})
+        assert r.status_code == 200 and r.content == b"42"
+
+    @override_settings(WHATSAPP_WEBHOOK_VERIFY_TOKEN="tok-123")
+    def test_wrong_verify_token_403(self):
+        r = self.client.get(WEBHOOK_URLS[0], {"hub.mode": "subscribe", "hub.verify_token": "your_verify_token",
+                                              "hub.challenge": "42"})
+        assert r.status_code == 403 and b"42" not in r.content
+
+    def test_old_hardcoded_token_no_longer_works(self):
+        r = self.client.get(WEBHOOK_URLS[0], {"hub.mode": "subscribe", "hub.verify_token": "your_verify_token",
+                                              "hub.challenge": "42"})
+        assert r.status_code == 403
+
+    def test_plain_get_still_ok(self):
+        assert self.client.get(WEBHOOK_URLS[0]).status_code == 200
+
+
+from io import StringIO
+
+from django.core.management import CommandError, call_command
+
+AUTH = "Bearer abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+@override_settings(WHATSAPP_WEBHOOK_AUTH_HEADER=AUTH,
+                   WHATSAPP_CONFIG={"API_KEY": "d360-key", "API_URL": "https://waba-v2.360dialog.io"})
+class ConfigureWebhookCommandTests(TestCase):
+    def run_cmd(self, *args):
+        out = StringIO()
+        call_command("configure_whatsapp_webhook", *args, stdout=out)
+        return out.getvalue()
+
+    def test_dry_run_does_not_call_360dialog(self):
+        with patch("campaigns.management.commands.configure_whatsapp_webhook.requests.post") as post:
+            out = self.run_cmd("--url", "https://example.com/webhook/whatsapp/")
+        post.assert_not_called()
+        assert "--apply" in out and AUTH not in out  # never print the secret
+
+    def test_apply_registers_url_and_header(self):
+        with patch("campaigns.management.commands.configure_whatsapp_webhook.requests.post") as post:
+            post.return_value.status_code = 201
+            post.return_value.json.return_value = {"url": "https://example.com/webhook/whatsapp/"}
+            out = self.run_cmd("--url", "https://example.com/webhook/whatsapp/", "--apply")
+        url, = post.call_args.args
+        assert url == "https://waba-v2.360dialog.io/v1/configs/webhook"
+        assert post.call_args.kwargs["headers"]["D360-API-KEY"] == "d360-key"
+        assert post.call_args.kwargs["json"] == {"url": "https://example.com/webhook/whatsapp/",
+                                                 "headers": {"Authorization": AUTH}}
+        assert AUTH not in out
+
+    def test_refuses_without_auth_header_setting(self):
+        with override_settings(WHATSAPP_WEBHOOK_AUTH_HEADER=""), self.assertRaises(CommandError):
+            self.run_cmd("--url", "https://example.com/webhook/whatsapp/", "--apply")
+
+    def test_refuses_non_https_url(self):
+        with self.assertRaises(CommandError):
+            self.run_cmd("--url", "http://example.com/webhook/whatsapp/", "--apply")
+
+    def test_api_error_is_reported(self):
+        with patch("campaigns.management.commands.configure_whatsapp_webhook.requests.post") as post:
+            post.return_value.status_code = 401
+            post.return_value.text = "unauthorized"
+            with self.assertRaises(CommandError):
+                self.run_cmd("--url", "https://example.com/webhook/whatsapp/", "--apply")

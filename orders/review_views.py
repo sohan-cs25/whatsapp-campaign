@@ -5,13 +5,13 @@ server), approve the ones without blocking issues, and queue approved orders for
 
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Order, OrderLine, ParsedChatFile
-from .serializers import ReviewOrderSerializer, ReviewOrderUpdateSerializer
+from .models import Order, OrderLine, ParsedChatFile, Product
+from .serializers import ProductSerializer, ReviewOrderSerializer, ReviewOrderUpdateSerializer
 from .tasks import send_order_batch
 
 SENT_STATUSES = ('sent', 'delivered', 'read')
@@ -112,3 +112,15 @@ def send_approved_orders(request, parsed_file_id):
         return Response({'error': 'No approved orders waiting to be sent'}, status=status.HTTP_400_BAD_REQUEST)
     send_order_batch.delay(str(pf.id))
     return Response({'queued': count})
+
+
+class ProductViewSet(viewsets.ModelViewSet):
+    """Products and prices. Delete deactivates, so past order lines keep their product."""
+    permission_classes = [IsAuthenticated]
+    serializer_class = ProductSerializer
+    queryset = Product.objects.all()
+    pagination_class = None
+
+    def perform_destroy(self, instance):
+        instance.is_active = False
+        instance.save(update_fields=['is_active', 'updated_at'])

@@ -13,11 +13,34 @@ from .models import ChatFile, ParsedChatFile, ValidatedFile, Order
 
 logger = logging.getLogger(__name__)
 
-def get_prices_from_google_sheet() -> dict:
+def fetch_price_sheet_rows() -> List[Dict]:
+    """Rows of the price Google Sheet: [{"name", "price", "unit"}]. unit is None without a 'unit' column.
+    Raises on network or format errors."""
     import requests
     from io import StringIO
-    from django.core.cache import cache
     from decouple import config
+
+    response = requests.get(config('PRICE_LIST_SHEET_URL'), timeout=10)
+    response.raise_for_status()
+    df = pd.read_csv(StringIO(response.text))
+    df.columns = [c.strip().lower() for c in df.columns]
+
+    item_col = next((c for c in df.columns if c in ['item', 'product', 'name']), None)
+    price_col = next((c for c in df.columns if c in ['price', 'rate', 'amount']), None)
+    unit_col = 'unit' if 'unit' in df.columns else None
+    if not item_col or not price_col:
+        raise ValueError(f"Could not find Item/Price columns. Found: {list(df.columns)}")
+
+    return [
+        {"name": str(row[item_col]).strip(), "price": float(row[price_col]),
+         "unit": str(row[unit_col]).strip().lower() if unit_col and pd.notna(row[unit_col]) else None}
+        for _, row in df.iterrows()
+        if pd.notna(row[item_col]) and pd.notna(row[price_col])
+    ]
+
+
+def get_prices_from_google_sheet() -> dict:
+    from django.core.cache import cache
 
     CACHE_KEY = 'price_list_from_sheet'
     CACHE_TIMEOUT = 600  # 10 minutes
@@ -28,26 +51,8 @@ def get_prices_from_google_sheet() -> dict:
         return cached
 
     try:
-        sheet_url = config('PRICE_LIST_SHEET_URL')
         logger.info("Fetching price list from Google Sheet...")
-        response = requests.get(sheet_url, timeout=10)
-        response.raise_for_status()
-
-        df = pd.read_csv(StringIO(response.text))
-        df.columns = [c.strip().lower() for c in df.columns]
-
-        item_col = next((c for c in df.columns if c in ['item', 'product', 'name']), None)
-        price_col = next((c for c in df.columns if c in ['price', 'rate', 'amount']), None)
-
-        if not item_col or not price_col:
-            logger.error(f"Could not find Item/Price columns. Found: {list(df.columns)}")
-            return {}
-
-        prices = {
-            str(row[item_col]).strip().lower(): float(row[price_col])
-            for _, row in df.iterrows()
-            if pd.notna(row[item_col]) and pd.notna(row[price_col])
-        }
+        prices = {r["name"].lower(): r["price"] for r in fetch_price_sheet_rows()}
 
         logger.info(f"Loaded {len(prices)} prices from Google Sheet: {prices}")
         cache.set(CACHE_KEY, prices, CACHE_TIMEOUT)

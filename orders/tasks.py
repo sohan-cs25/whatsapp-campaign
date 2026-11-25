@@ -367,7 +367,34 @@ def cleanup_old_files():
             'error': error_msg
         }
 
+ORDER_SEND_GAP_SECONDS = 2
+
+
 @shared_task
 def send_order_batch(parsed_file_id):
-    """Queue approved orders of a processed chat file for sending. Implemented in the sending task."""
-    raise NotImplementedError
+    """Schedule every approved, unsent order of a processed chat file, 2 seconds apart."""
+    orders = Order.objects.filter(parsed_file_id=parsed_file_id, review_status='approved',
+                                  status='pending').order_by('created_at')
+    ids = [str(o.id) for o in orders]
+    for i, order_id in enumerate(ids):
+        send_single_order.apply_async(args=[order_id], countdown=i * ORDER_SEND_GAP_SECONDS)
+    logger.info(f"Scheduled {len(ids)} order messages for parsed file {parsed_file_id}")
+    return {'scheduled': len(ids)}
+
+
+@shared_task
+def send_single_order(order_id):
+    """Send one approved order. The pending -> sending claim makes duplicate tasks harmless."""
+    claimed = Order.objects.filter(id=order_id, status='pending',
+                                   review_status='approved').update(status='sending')
+    if not claimed:
+        logger.info(f"Order {order_id} not pending+approved; skipping send")
+        return 'skipped'
+    from .whatsapp_service import OrderWhatsAppService
+    order = Order.objects.get(id=order_id)
+    try:
+        OrderWhatsAppService().send_order_message(order)
+    except Exception as e:
+        logger.error(f"Sending order {order_id} failed: {e}")
+    order.refresh_from_db()
+    return order.status

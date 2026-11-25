@@ -104,6 +104,30 @@ class OrderWhatsAppService:
                 "importer_name": "Farmveda"
             }], total_amount * 100
 
+    @staticmethod
+    def line_to_whatsapp_item(line) -> Dict[str, Any]:
+        """One order_details item for an OrderLine. Whole quantities in the product's price unit are
+        sent as quantity x unit price; anything else as one item priced at the line total, so the
+        items always add up exactly to the order total."""
+        from .models import _fmt_qty
+        from .pricing import to_price_unit
+
+        qty = None
+        if line.product is not None and line.quantity is not None:
+            qty = to_price_unit(line.quantity, line.unit or None, line.product.price_unit)
+        if qty is not None and qty >= 1 and qty == qty.to_integral_value():
+            name, quantity, value = line.name, int(qty), line.unit_price_paise
+        else:
+            suffix = f" ({_fmt_qty(line.quantity)} {line.unit})".rstrip() if line.quantity is not None else ""
+            name, quantity, value = f"{line.name}{suffix}", 1, line.line_total_paise
+        return {
+            "amount": {"offset": 100, "value": value},
+            "name": name,
+            "quantity": quantity,
+            "country_of_origin": "India",
+            "importer_name": "Farmveda",
+        }
+
     def build_order_details_payload(self, order) -> Dict[str, Any]:
         """
         Build order_details template payload from Order object
@@ -142,8 +166,13 @@ class OrderWhatsAppService:
             logger.info(f"   Processed order_items_str: '{order_items_str}'")
             logger.info(f"   Processed total_amount_str: '{total_amount_str}'")
 
-            # Parse items and amounts
-            items, total_value_paisa = self.parse_order_items(order_items_str, total_amount_str)
+            if order.pk and order.lines.exists():
+                # Reviewed order: exact line items whose amounts add up to total_paise
+                items = [self.line_to_whatsapp_item(line) for line in order.lines.all()]
+                total_value_paisa = order.total_paise or 0
+            else:
+                # Legacy validated-file order: parse the order_items / amount strings
+                items, total_value_paisa = self.parse_order_items(order_items_str, total_amount_str)
 
             logger.info(f"   Parsed items count: {len(items)}")
             logger.info(f"   Total amount in paisa: {total_value_paisa}")

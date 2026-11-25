@@ -77,6 +77,8 @@ API_ENDPOINTS = {
         'analytics': '/orders/analytics/',
         'process_stream': '/orders/process-stream/',
         'send_messages': '/orders/send-messages/',
+        'review': '/orders/review/',
+        'products': '/orders/products/',
     }
 }
 

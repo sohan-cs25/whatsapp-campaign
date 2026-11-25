@@ -119,6 +119,9 @@ def make_api_request(endpoint: str, method: str = "GET", data: dict = None, file
             else:
                 headers["Content-Type"] = "application/json"
                 return requests.post(url, headers=headers, json=data, timeout=30)
+        elif method == "PATCH":
+            headers["Content-Type"] = "application/json"
+            return requests.patch(url, headers=headers, json=data, timeout=30)
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to the backend API. Please ensure the Django server is running on port 8000.")
         return None
@@ -259,8 +262,9 @@ def show_dashboard_page():
     page_options = [
         "📊 Dashboard",
         "📄 Extract Orders",
-        "📂 Manage Files",
-        "📤 Send Order Messages",
+        "🧾 Review Orders",
+        "📂 Legacy: Upload Validated File",
+        "📤 Legacy: Send Validated Orders",
         "💰 Payment Tracking",
         "📈 Analytics"
     ]
@@ -277,14 +281,184 @@ def show_dashboard_page():
         show_dashboard_content()
     elif selected_page == "📄 Extract Orders":
         show_extract_orders_page()
-    elif selected_page == "📂 Manage Files":
+    elif selected_page == "🧾 Review Orders":
+        show_review_orders_page()
+    elif selected_page == "📂 Legacy: Upload Validated File":
         show_manage_files_page()
-    elif selected_page == "📤 Send Order Messages":
+    elif selected_page == "📤 Legacy: Send Validated Orders":
         show_send_messages_page()
     elif selected_page == "💰 Payment Tracking":
         show_payment_tracking_page()
     elif selected_page == "📈 Analytics":
         show_analytics_page()
+
+UNITS = ["kg", "g", "l", "ml", "box", "piece", "packet", "dozen", "bunch"]
+
+
+def rupees(paise):
+    return f"₹{(paise or 0) / 100:,.2f}"
+
+
+def show_review_orders_page():
+    """Review one processed chat file's customer orders, approve them and send payment messages."""
+    st.header("🧾 Review Orders")
+    tab_orders, tab_products = st.tabs(["Orders", "Products & prices"])
+
+    products_resp = make_api_request(API_ENDPOINTS['orders']['products'])
+    products = products_resp.json() if products_resp is not None and products_resp.status_code == 200 else []
+    product_by_key = {p["key"]: p for p in products}
+    active_keys = [p["key"] for p in products if p["is_active"]]
+
+    with tab_orders:
+        files_resp = make_api_request(API_ENDPOINTS['orders']['processed_files'])
+        if files_resp is None or files_resp.status_code != 200:
+            st.error("Unable to load processed files.")
+            return
+        files = files_resp.json().get('results', [])
+        if not files:
+            st.info("No processed chat files yet. Upload one in 📄 Extract Orders.")
+            return
+        labels = {f"{f['file_name']} ({str(f.get('processed_at', ''))[:16]})": f["id"] for f in files}
+        file_id = labels[st.selectbox("Processed chat file", list(labels))]
+
+        resp = make_api_request(f"{API_ENDPOINTS['orders']['review']}{file_id}/")
+        if resp is None or resp.status_code != 200:
+            st.error("Unable to load orders for this file.")
+            return
+        data = resp.json()
+        s = data["summary"]
+        cols = st.columns(6)
+        cols[0].metric("Orders", s["orders"])
+        cols[1].metric("⚠️ Need review", s["needs_review"])
+        cols[2].metric("Approved", s["approved"])
+        cols[3].metric("Sent", s["sent"])
+        cols[4].metric("Failed", s["failed"])
+        cols[5].metric("Total", rupees(s["total_paise"]))
+
+        b1, b2, b3 = st.columns(3)
+        if b1.button("✅ Approve all clean orders", use_container_width=True):
+            r = make_api_request(f"{API_ENDPOINTS['orders']['review']}{file_id}/approve/", "POST", {"all_clean": True})
+            if r is not None and r.status_code == 200:
+                st.success(f"Approved {len(r.json()['approved'])} orders")
+                st.rerun()
+        confirm = b2.checkbox("I have reviewed the approved orders")
+        if b2.button("📤 Send approved orders", use_container_width=True, disabled=not confirm):
+            r = make_api_request(f"{API_ENDPOINTS['orders']['review']}{file_id}/send/", "POST", {})
+            if r is not None and r.status_code == 200:
+                st.success(f"Queued {r.json()['queued']} payment messages (sent 2 seconds apart).")
+            elif r is not None:
+                st.error(r.json().get("error", "Could not queue messages"))
+        if b3.button("🔄 Refresh", use_container_width=True):
+            st.rerun()
+
+        only_flagged = st.toggle("Needs review only", value=False)
+        for order in data["orders"]:
+            if only_flagged and not order["needs_review"]:
+                continue
+            show_review_order(order, file_id, product_by_key, active_keys)
+
+    with tab_products:
+        show_products_editor(products)
+
+
+def show_review_order(order, file_id, product_by_key, active_keys):
+    oid = order["id"]
+    title = (f"{'⚠️ ' if order['needs_review'] else ''}{order['customer_name'] or order['number']} — "
+             f"{rupees(order['total_paise'])} — {order['review_status']} / {order['status']}")
+    with st.expander(title, expanded=order["needs_review"] and order["status"] == "pending"):
+        if order["blocking_issues"]:
+            st.warning("Cannot approve: " + ", ".join(order["blocking_issues"]))
+        if order["review_flags"]:
+            st.caption("Flags: " + ", ".join(order["review_flags"]))
+        editable = order["status"] == "pending"
+
+        c1, c2 = st.columns(2)
+        number = c1.text_input("Phone (e.g. 919800000001)", order["number"], key=f"num_{oid}", disabled=not editable)
+        address = c2.text_input("Address", order["address"], key=f"addr_{oid}", disabled=not editable)
+
+        lines_df = pd.DataFrame([{
+            "product": l["product"], "name": l["name"],
+            "quantity": float(l["quantity"]) if l["quantity"] is not None else None,
+            "unit": l["unit"] or None, "line total": rupees(l["line_total_paise"]),
+            "flags": ", ".join(l["flags"]),
+        } for l in order["lines"]], columns=["product", "name", "quantity", "unit", "line total", "flags"])
+        edited = st.data_editor(
+            lines_df, key=f"lines_{oid}", num_rows="dynamic" if editable else "fixed",
+            disabled=not editable or ["line total", "flags"], use_container_width=True,
+            column_config={
+                "product": st.column_config.SelectboxColumn("Product", options=active_keys),
+                "unit": st.column_config.SelectboxColumn("Unit", options=UNITS),
+                "quantity": st.column_config.NumberColumn("Quantity", min_value=0.0, step=0.25),
+            },
+        )
+        if not editable:
+            return
+
+        a, b, c = st.columns(3)
+        if a.button("💾 Save", key=f"save_{oid}", use_container_width=True):
+            lines = []
+            for _, r in edited.iterrows():
+                key = r["product"] if isinstance(r["product"], str) and r["product"] else None
+                name = product_by_key[key]["name"] if key else (r["name"] or "")
+                if not name:
+                    continue
+                qty = r["quantity"]
+                lines.append({"product": key, "name": name,
+                              "quantity": None if pd.isna(qty) else str(qty),
+                              "unit": r["unit"] if isinstance(r["unit"], str) else ""})
+            resp = make_api_request(f"{API_ENDPOINTS['orders']['review']}orders/{oid}/", "PATCH",
+                                    {"number": number, "address": address, "lines": lines})
+            if resp is not None and resp.status_code == 200:
+                st.rerun()
+            elif resp is not None:
+                st.error(resp.json())
+        if b.button("✅ Approve", key=f"approve_{oid}", use_container_width=True):
+            if (number, address) != (order["number"], order["address"]):
+                make_api_request(f"{API_ENDPOINTS['orders']['review']}orders/{oid}/", "PATCH",
+                                 {"number": number, "address": address})
+            r = make_api_request(f"{API_ENDPOINTS['orders']['review']}{file_id}/approve/", "POST",
+                                 {"order_ids": [oid]})
+            if r is not None and r.status_code == 200 and r.json()["approved"]:
+                st.rerun()
+            elif r is not None and r.status_code == 200 and r.json()["refused"]:
+                st.error("Cannot approve: " + ", ".join(r.json()["refused"][0]["issues"]))
+        if c.button("🚫 Reject", key=f"reject_{oid}", use_container_width=True):
+            make_api_request(f"{API_ENDPOINTS['orders']['review']}orders/{oid}/", "PATCH", {"review_status": "rejected"})
+            st.rerun()
+
+
+def show_products_editor(products):
+    st.caption("Prices used for every order line. Price is in rupees per unit.")
+    df = pd.DataFrame(products, columns=["id", "key", "name", "price", "price_unit", "is_active"])
+    edited = st.data_editor(
+        df, key="products_editor", num_rows="dynamic", use_container_width=True,
+        disabled=["id"], hide_index=True,
+        column_config={
+            "price_unit": st.column_config.SelectboxColumn("Unit", options=UNITS),
+            "price": st.column_config.NumberColumn("Price (₹)", min_value=0.0, step=1.0),
+            "key": st.column_config.TextColumn("Key (snake_case)"),
+        },
+    )
+    if st.button("💾 Save products"):
+        errors = 0
+        original = {p["id"]: p for p in products}
+        for _, r in edited.iterrows():
+            body = {"key": r["key"], "name": r["name"], "price": str(r["price"]),
+                    "price_unit": r["price_unit"], "is_active": bool(r["is_active"]) if pd.notna(r["is_active"]) else True}
+            if pd.isna(r["id"]):
+                resp = make_api_request(API_ENDPOINTS['orders']['products'], "POST", body)
+            else:
+                old = original.get(int(r["id"]), {})
+                if all(str(old.get(k)) == str(v) for k, v in body.items()):
+                    continue
+                resp = make_api_request(f"{API_ENDPOINTS['orders']['products']}{int(r['id'])}/", "PATCH", body)
+            if resp is None or resp.status_code not in (200, 201):
+                errors += 1
+                st.error(f"{r['name']}: {resp.json() if resp is not None else 'no response'}")
+        if not errors:
+            st.success("Products saved")
+            st.rerun()
+
 
 def show_dashboard_content():
     """Display dashboard metrics"""
@@ -468,7 +642,12 @@ def show_extract_orders_page():
                                             with col3:
                                                 st.metric("Processing Time", "Complete")
 
-                                            # Download button
+                                            st.success(
+                                                "✅ Orders are ready. Open **🧾 Review Orders** in the sidebar to "
+                                                "check flagged orders, approve them and send payment messages."
+                                            )
+
+                                            # Download button (optional: the raw per-message sheet for reference)
                                             if st.button("📥 Download Processed File", use_container_width=True):
                                                 download_response = make_api_request(
                                                     f"{API_ENDPOINTS['orders']['processed_files']}{latest_file['id']}/download/"

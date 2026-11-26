@@ -103,6 +103,9 @@ class BaseLLM:
             try:
                 return self._call(system, user, tool_name, schema)
             except Exception as e:  # rate limits, transient 5xx, malformed JSON
+                code = getattr(e, "status_code", None)
+                if isinstance(code, int) and 400 <= code < 500 and code != 429:
+                    raise  # a bad request or bad key fails the same way every time
                 if attempt == self.max_retries - 1:
                     raise
                 rate_limited = "429" in str(e) or "rate" in str(e).lower()
@@ -141,7 +144,9 @@ class AnthropicLLM(BaseLLM):
 
 
 class OpenAILLM(BaseLLM):
-    """Forced function calling.  Env: OPENAI_API_KEY.  pip install openai
+    """Forced function calling over the Responses API (/v1/responses).  Env: OPENAI_API_KEY.
+    pip install openai>=1.66.  Newer reasoning models (e.g. gpt-5.6-luna) refuse function tools
+    on /v1/chat/completions, so Chat Completions is not used.
     temperature is left unset by default: GPT-5 / o-series reasoning models reject it."""
 
     default_model = "gpt-5"
@@ -155,18 +160,21 @@ class OpenAILLM(BaseLLM):
 
     def _call(self, system, user, tool_name, schema):
         extra = {"temperature": self.temperature} if self.temperature is not None else {}
-        resp = self.client.chat.completions.create(
+        resp = self.client.responses.create(
             model=self.model,
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            tools=[{"type": "function", "function": {
-                "name": tool_name, "description": "Return the result.", "parameters": schema}}],
-            tool_choice={"type": "function", "function": {"name": tool_name}},
+            instructions=system,
+            input=user,
+            # strict=False: the Responses API defaults to strict schemas, which require every
+            # property to be listed as required; ours have optional fields.
+            tools=[{"type": "function", "name": tool_name, "description": "Return the result.",
+                    "parameters": schema, "strict": False}],
+            tool_choice={"type": "function", "name": tool_name},
             **extra,
         )
-        calls = resp.choices[0].message.tool_calls
-        if not calls:
-            raise RuntimeError("Model returned no tool call")
-        return json.loads(calls[0].function.arguments)
+        for item in resp.output or []:
+            if getattr(item, "type", None) == "function_call" and getattr(item, "name", None) == tool_name:
+                return json.loads(item.arguments)
+        raise RuntimeError("Model returned no tool call")
 
 
 def _to_gemini_schema(s):

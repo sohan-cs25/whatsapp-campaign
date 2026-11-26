@@ -79,6 +79,7 @@ API_ENDPOINTS = {
         'send_messages': '/orders/send-messages/',
         'review': '/orders/review/',
         'products': '/orders/products/',
+        'customers': '/orders/customers/',
     }
 }
 

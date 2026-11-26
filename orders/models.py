@@ -183,6 +183,8 @@ class Order(models.Model):
 
     # Review
     customer_name = models.CharField(max_length=120, blank=True)
+    chat_sender = models.CharField(max_length=120, blank=True,
+                                   help_text="Sender name/number exactly as in the chat; links the order to its messages")
     address = models.CharField(max_length=64, blank=True)
     review_status = models.CharField(max_length=10, choices=REVIEW_STATUS_CHOICES, default='draft')
     needs_review = models.BooleanField(default=False)
@@ -364,3 +366,86 @@ class WebhookEvent(models.Model):
             models.Index(fields=['message_id']),
             models.Index(fields=['payment_reference_id']),
         ]
+
+# ── Customer directory and chat messages ────────────────────────────────────
+
+def flat_key(address) -> str:
+    """Comparable key for a flat/house: block letter + number. 'C-234', '234-c' and '234 C'
+    all give 'C234'; 'House 182' and '182-Jalvayu' give '182'. Words (House, JVV, a building
+    name) are ignored; no number gives ''."""
+    tokens = re.findall(r"[A-Z]+|\d+", str(address or "").upper())
+    number = next((t for t in tokens if t.isdigit()), "")
+    if not number:
+        return ""
+    letter = next((t for t in tokens if t.isalpha() and len(t) == 1), "")
+    return f"{letter}{number}"
+
+
+def normalize_phone(raw) -> str:
+    """Digits only, with 91 added to a 10-digit Indian number; '' if it is not a phone number."""
+    digits = re.sub(r"\D", "", str(raw or ""))
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits if 10 <= len(digits) <= 15 else ""
+
+
+class CustomerContact(models.Model):
+    """A seller's flat -> phone directory. Fills in phone numbers for orders whose chat
+    shows only a saved contact name; reviewers' phone edits are remembered here."""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='customer_contacts')
+    flat = models.CharField(max_length=32, help_text="As written, e.g. C-234")
+    flat_key = models.CharField(max_length=32, editable=False)
+    phone = models.CharField(max_length=20)
+    name = models.CharField(max_length=120, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'customer_contacts'
+        ordering = ['flat_key']
+        constraints = [models.UniqueConstraint(fields=['user', 'flat_key'], name='uniq_contact_flat_per_user')]
+
+    def __str__(self):
+        return f"{self.flat} -> {self.phone}"
+
+    def save(self, *args, **kwargs):
+        self.flat_key = flat_key(self.flat)
+        self.phone = normalize_phone(self.phone) or self.phone
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def phone_for(cls, user, address) -> str:
+        key = flat_key(address)
+        if not key or user is None:
+            return ""
+        return cls.objects.filter(user=user, flat_key=key).values_list('phone', flat=True).first() or ""
+
+    @classmethod
+    def remember(cls, user, address, phone, name=""):
+        """Save (or update) the phone for this flat. Ignores unusable flats or numbers."""
+        key, phone = flat_key(address), normalize_phone(phone)
+        if not key or not phone or user is None:
+            return None
+        contact, _ = cls.objects.update_or_create(
+            user=user, flat_key=key, defaults={'flat': address, 'phone': phone, **({'name': name} if name else {})})
+        return contact
+
+
+class ChatMessage(models.Model):
+    """Every message of a processed chat, kept so reviewers can see where an order came from.
+    msg_id is the extractor's id (m0, m1, ...) and '' for skipped rows (media, deleted)."""
+    parsed_file = models.ForeignKey(ParsedChatFile, on_delete=models.CASCADE, related_name='messages')
+    position = models.PositiveIntegerField()
+    msg_id = models.CharField(max_length=16, blank=True)
+    date = models.CharField(max_length=20, blank=True)
+    time = models.CharField(max_length=20, blank=True)
+    sender = models.CharField(max_length=120)
+    text = models.TextField(blank=True)
+    is_seller = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'chat_messages'
+        ordering = ['parsed_file', 'position']
+        indexes = [models.Index(fields=['parsed_file', 'sender'])]
+
+    def __str__(self):
+        return f"[{self.msg_id}] {self.sender}: {self.text[:40]}"

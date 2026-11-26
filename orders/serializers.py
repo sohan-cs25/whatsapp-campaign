@@ -169,7 +169,7 @@ class ProcessingStatsSerializer(serializers.Serializer):
 
 # ── Review flow ─────────────────────────────────────────────────────────────
 
-from .models import OrderLine, Product, UNITS  # noqa: E402
+from .models import CustomerContact, OrderLine, Product, UNITS, flat_key, normalize_phone  # noqa: E402
 
 
 class OrderLineSerializer(serializers.ModelSerializer):
@@ -188,10 +188,30 @@ class ReviewOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = ['id', 'order_id', 'customer_name', 'number', 'address', 'review_status', 'needs_review',
-                  'review_flags', 'blocking_issues', 'total_paise', 'status', 'payment_status', 'lines']
+                  'review_flags', 'blocking_issues', 'total_paise', 'status', 'payment_status', 'lines',
+                  'messages']
+
+    messages = serializers.SerializerMethodField()
 
     def get_blocking_issues(self, obj):
         return obj.blocking_issues()
+
+    def get_messages(self, obj):
+        """The customer's chat messages; 'used' marks the ones the order lines came from.
+        Pass context['messages_by_sender'] to avoid a query per order."""
+        by_sender = self.context.get('messages_by_sender')
+        if by_sender is None:
+            from .models import ChatMessage
+            msgs = list(ChatMessage.objects.filter(parsed_file_id=obj.parsed_file_id, sender=obj.chat_sender)
+                        ) if obj.parsed_file_id and obj.chat_sender else []
+        else:
+            msgs = by_sender.get(obj.chat_sender, [])
+        used = {m for line in obj.lines.all() for m in (line.message_ids or '').split(',') if m}
+        return [chat_message_data(m, used=bool(m.msg_id) and m.msg_id in used) for m in msgs]
+
+
+def chat_message_data(m, **extra):
+    return {'id': m.msg_id, 'date': m.date, 'time': m.time, 'sender': m.sender, 'text': m.text, **extra}
 
 
 class LineInputSerializer(serializers.Serializer):
@@ -227,3 +247,22 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = ['id', 'key', 'name', 'price', 'price_unit', 'is_active', 'updated_at']
         read_only_fields = ['id', 'updated_at']
+
+
+class CustomerContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomerContact
+        fields = ['id', 'flat', 'flat_key', 'phone', 'name', 'updated_at']
+        read_only_fields = ['id', 'flat_key', 'updated_at']
+        validators = []  # (user, flat_key) uniqueness is handled as an upsert in the view
+
+    def validate_flat(self, value):
+        if not flat_key(value):
+            raise serializers.ValidationError("Needs a flat/house number, e.g. C-234 or 182")
+        return value.strip()
+
+    def validate_phone(self, value):
+        phone = normalize_phone(value)
+        if not phone:
+            raise serializers.ValidationError("Not a phone number; use 10 digits or 91 followed by 10 digits")
+        return phone

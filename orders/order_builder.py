@@ -11,7 +11,10 @@ from typing import List
 import pandas as pd
 from django.db import transaction
 
-from .models import Order, OrderLine, Product
+from .models import CustomerContact, Order, OrderLine, Product
+
+# Flags that explain where data came from; on their own they do not make an order need review.
+INFO_FLAGS = {"address_from_other_orders", "phone_from_directory"}
 
 
 class RebuildBlocked(Exception):
@@ -97,12 +100,19 @@ def build_orders(parsed_file, orders_df: pd.DataFrame) -> List[Order]:
             continue  # everything this customer ordered was cancelled
 
         addresses = Counter(r["address"] for r in records if _present(r.get("address")) and r["address"])
+        address = addresses.most_common(1)[0][0] if addresses else ""
+        number = _phone_for(str(sender), [r.get("phone") for r in records])
+        if not number:  # chat shows a saved contact name only: look the flat up
+            number = CustomerContact.phone_for(parsed_file.user, address)
+            if number:
+                order_flags.add("phone_from_directory")
         order = Order.objects.create(
             user=parsed_file.user,
             parsed_file=parsed_file,
             customer_name=str(sender)[:120],
-            number=_phone_for(str(sender), [r.get("phone") for r in records]),
-            address=addresses.most_common(1)[0][0] if addresses else "",
+            chat_sender=str(sender)[:120],
+            number=number,
+            address=address,
             order_items="",
             amount="",
             review_status="draft",
@@ -117,7 +127,7 @@ def build_orders(parsed_file, orders_df: pd.DataFrame) -> List[Order]:
         line_flags = {f for l in order.lines.all() for f in l.flags}
         order.review_flags = sorted(row_flags | line_flags | order_flags)
         order.needs_review = (any(bool(r.get("needs_review")) for r in records)
-                              or bool(set(order.review_flags) - {"address_from_other_orders"})
+                              or bool(set(order.review_flags) - INFO_FLAGS)
                               or bool(order.blocking_issues()))
         order.save(update_fields=["review_flags", "needs_review", "updated_at"])
         built.append(order)

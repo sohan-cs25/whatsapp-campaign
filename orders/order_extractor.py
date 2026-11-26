@@ -449,6 +449,13 @@ def postprocess(result: Dict, catalog: List[Dict], msgs: List[Dict]) -> pd.DataF
     names = {p["id"]: p["name"] for p in catalog}
     known_ids = set(names)
 
+    # The sender is the chat's own sender of the cited messages, not the LLM's copy of it
+    # (the LLM sometimes shortens names, which would split a customer or lose their messages).
+    for o in result["orders"]:
+        cited = Counter(by_id[i]["sender"] for i in o.get("message_ids") or [] if i in by_id)
+        if cited:
+            o["sender"] = cited.most_common(1)[0][0]
+
     # Sender -> address directory, built from every order in the chat.
     directory: Dict[str, Counter] = defaultdict(Counter)
     for o in result["orders"]:

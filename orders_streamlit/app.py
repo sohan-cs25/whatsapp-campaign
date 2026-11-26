@@ -8,6 +8,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import json
+import re
 from datetime import datetime
 import time
 from product_rows import product_row_changed
@@ -123,6 +124,8 @@ def make_api_request(endpoint: str, method: str = "GET", data: dict = None, file
         elif method == "PATCH":
             headers["Content-Type"] = "application/json"
             return requests.patch(url, headers=headers, json=data, timeout=30)
+        elif method == "DELETE":
+            return requests.delete(url, headers=headers, timeout=30)
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to the backend API. Please ensure the Django server is running on port 8000.")
         return None
@@ -303,7 +306,7 @@ def rupees(paise):
 def show_review_orders_page():
     """Review one processed chat file's customer orders, approve them and send payment messages."""
     st.header("🧾 Review Orders")
-    tab_orders, tab_products = st.tabs(["Orders", "Products & prices"])
+    tab_orders, tab_customers, tab_products = st.tabs(["Orders", "📇 Customer phones", "Products & prices"])
 
     products_resp = make_api_request(API_ENDPOINTS['orders']['products'])
     products = products_resp.json() if products_resp is not None and products_resp.status_code == 200 else []
@@ -352,14 +355,85 @@ def show_review_orders_page():
         if b3.button("🔄 Refresh", use_container_width=True):
             st.rerun()
 
+        seller_msgs = data.get("seller_messages", [])
+        if seller_msgs:
+            with st.expander(f"📢 Seller messages ({len(seller_msgs)}): price lists, out of stock, delivery notes"):
+                show_chat_messages(seller_msgs, with_sender=True)
+
         only_flagged = st.toggle("Needs review only", value=False)
         for order in data["orders"]:
             if only_flagged and not order["needs_review"]:
                 continue
             show_review_order(order, file_id, product_by_key, active_keys)
 
+        unordered = data.get("unordered_messages", [])
+        if unordered:
+            st.subheader(f"💬 Messages from customers with no order ({len(unordered)})")
+            st.caption("Check these: a photo of a list, a question, or an order the AI could not read.")
+            show_chat_messages(unordered, with_sender=True)
+
+    with tab_customers:
+        show_customers_editor()
+
     with tab_products:
         show_products_editor(products)
+
+
+def _md(text):
+    """Escape Markdown so chat text is shown as written."""
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!|>~<])", r"\\\1", str(text)).replace("\n", "  \n")
+
+
+def show_chat_messages(messages, with_sender=False):
+    for m in messages:
+        mark = "✅ " if m.get("used") else ""
+        who = f"**{_md(m['sender'])}** · " if with_sender else ""
+        st.markdown(f"{mark}<span style='color:gray'>{_md(m['date'])} {_md(m['time'])}</span> · {who}{_md(m['text'])}",
+                    unsafe_allow_html=True)
+
+
+def show_customers_editor():
+    st.caption("Flat → phone number. Orders whose chat shows only a contact name get their phone from here. "
+               "Phones you type on an order are saved here automatically.")
+    resp = make_api_request(API_ENDPOINTS['orders']['customers'])
+    contacts = resp.json() if resp is not None and resp.status_code == 200 else []
+    df = pd.DataFrame(contacts, columns=["id", "flat", "phone", "name"])
+    edited = st.data_editor(
+        df, key="customers_editor", num_rows="dynamic", use_container_width=True, hide_index=True,
+        disabled=["id"],
+        column_config={"flat": st.column_config.TextColumn("Flat / house", help="e.g. C-234 or 182"),
+                       "phone": st.column_config.TextColumn("Phone", help="10 digits, or 91 + 10 digits"),
+                       "name": st.column_config.TextColumn("Name (optional)")},
+    )
+    if st.button("💾 Save customer phones"):
+        original = {c["id"]: c for c in contacts}
+        kept, errors, filled = set(), 0, 0
+        for _, r in edited.iterrows():
+            if not isinstance(r["flat"], str) or not r["flat"].strip():
+                continue
+            body = {"flat": r["flat"], "phone": str(r["phone"] or ""),
+                    "name": r["name"] if isinstance(r["name"], str) else ""}
+            if pd.isna(r["id"]):
+                resp = make_api_request(API_ENDPOINTS['orders']['customers'], "POST", body)
+            else:
+                cid = int(r["id"])
+                kept.add(cid)
+                old = original.get(cid, {})
+                if all(str(old.get(k) or "") == str(v or "") for k, v in body.items()):
+                    continue
+                resp = make_api_request(f"{API_ENDPOINTS['orders']['customers']}{cid}/", "PATCH", body)
+            if resp is None or resp.status_code not in (200, 201):
+                errors += 1
+                st.error(f"{r['flat']}: {resp.json() if resp is not None else 'no response'}")
+            else:
+                filled += resp.json().get("orders_filled", 0)
+        for cid in set(original) - kept:
+            resp = make_api_request(f"{API_ENDPOINTS['orders']['customers']}{cid}/", "DELETE")
+            if resp is None or resp.status_code != 204:
+                errors += 1
+        if not errors:
+            st.success(f"Saved. Filled the phone on {filled} waiting order(s).")
+            st.rerun()
 
 
 def show_review_order(order, file_id, product_by_key, active_keys):
@@ -371,6 +445,9 @@ def show_review_order(order, file_id, product_by_key, active_keys):
             st.warning("Cannot approve: " + ", ".join(order["blocking_issues"]))
         if order["review_flags"]:
             st.caption("Flags: " + ", ".join(order["review_flags"]))
+        if order.get("messages"):
+            st.markdown("**💬 From the chat** (✅ = the order's items came from this message)")
+            show_chat_messages(order["messages"])
         editable = order["status"] == "pending"
 
         c1, c2 = st.columns(2)

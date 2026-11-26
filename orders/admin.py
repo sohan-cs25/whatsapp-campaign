@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import ChatFile, ParsedChatFile, ValidatedFile, Order, WebhookEvent, Product
+from .models import ChatFile, ParsedChatFile, ValidatedFile, Order, WebhookEvent, Product, CustomerContact
 
 
 @admin.register(ChatFile)
@@ -210,3 +210,11 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = ['name', 'key', 'price', 'price_unit', 'is_active', 'updated_at']
     list_filter = ['is_active', 'price_unit']
     search_fields = ['name', 'key']
+
+
+@admin.register(CustomerContact)
+class CustomerContactAdmin(admin.ModelAdmin):
+    list_display = ['flat', 'flat_key', 'phone', 'name', 'user', 'updated_at']
+    list_filter = ['user']
+    search_fields = ['flat', 'flat_key', 'phone', 'name']
+    readonly_fields = ['flat_key', 'updated_at']

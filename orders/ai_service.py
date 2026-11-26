@@ -88,6 +88,15 @@ class DjangoOrderExtractionService:
             processed_messages.append(pm)
             message_types[pm["Message_Type"]] = message_types.get(pm["Message_Type"], 0) + 1
 
+        # Every input row (skipped media/deleted rows too, with id ''), kept for the review page
+        id_of_row = {id(m["_row"]): m["id"] for m in msgs}
+        result["messages"] = [{
+            "id": id_of_row.get(id(row), ""),
+            "date": str(row.get("Date", "")), "time": str(row.get("Time", "")),
+            "sender": str(row.get("Phone/Name", "")), "text": str(row.get("Message", "")),
+            "is_seller": row.get("Phone/Name") in sellers,
+        } for row in messages]
+
         orders_df = result["orders"]
         orders_found = orders_df["message_ids"].nunique() if not orders_df.empty else 0
         processing_time = time.time() - start_time

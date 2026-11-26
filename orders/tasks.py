@@ -101,7 +101,16 @@ def process_chat_file(self, chat_file_id):
             ),
         )
 
-        # Step 5: One priced order per customer, ready for review in the app
+        # Step 5: Keep the chat itself, so reviewers can see each order's source messages
+        from .models import ChatMessage
+        parsed_file.messages.all().delete()  # a retry replaces them
+        ChatMessage.objects.bulk_create([
+            ChatMessage(parsed_file=parsed_file, position=i, msg_id=m["id"], date=m["date"][:20],
+                        time=m["time"][:20], sender=m["sender"][:120], text=m["text"], is_seller=m["is_seller"])
+            for i, m in enumerate(run_result.get("messages") or [])
+        ])
+
+        # Step 6: One priced order per customer, ready for review in the app
         from .order_builder import build_orders
         orders = build_orders(parsed_file, run_result.get("orders"))
         parsed_file.total_orders = len(orders)

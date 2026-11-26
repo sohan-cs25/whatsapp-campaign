@@ -11,7 +11,7 @@ from .views import (
     send_order_messages,
     resend_payment_success_message
 )
-from .review_views import ProductViewSet, review_orders, update_review_order, approve_orders, send_approved_orders
+from .review_views import CustomerContactViewSet, ProductViewSet, review_orders, update_review_order, approve_orders, send_approved_orders
 
 app_name = 'orders'
 
@@ -22,6 +22,7 @@ router.register(r'processed-files', ParsedChatFileViewSet, basename='parsedchatf
 router.register(r'validated-files', ValidatedFileViewSet, basename='validatedfile')
 router.register(r'orders', OrderViewSet, basename='order')
 router.register(r'products', ProductViewSet, basename='product')
+router.register(r'customers', CustomerContactViewSet, basename='customer')
 
 urlpatterns = [
     # Review flow (before the router so 'review/...' is matched first)

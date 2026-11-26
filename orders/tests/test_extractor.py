@@ -140,3 +140,23 @@ class OpenAIResponsesApiTests(SimpleTestCase):
         with patch("orders.order_extractor.time.sleep"):
             assert Flaky().call("s", "u", "t", {}) == {"ok": True}
         assert len(calls) == 2
+
+
+class SenderFromMessagesTests(SimpleTestCase):
+    """The LLM sometimes shortens a sender ('Kamlesh Jvv' for 'Kamlesh Jvv 261'); the order's
+    sender must be the chat's own sender of the messages it cites."""
+
+    def test_order_sender_taken_from_cited_messages(self):
+        msgs = MSGS + [{"id": "m2", "date": "1/6/26", "time": "9:10 am", "sender": "Kamlesh Jvv 261",
+                        "text": "1 kg kesar #261"},
+                       {"id": "m3", "date": "1/6/26", "time": "9:20 am", "sender": "Kamlesh Jvv 261",
+                        "text": "add 1 kg kesar"}]
+        llm_orders = [
+            {"message_ids": ["m2"], "sender": "Kamlesh Jvv", "kind": "new", "items": [MANGO],
+             "block": "", "unit_no": "261", "flags": []},
+            {"message_ids": ["m3"], "sender": "Kamlesh", "kind": "addition", "items": [MANGO],
+             "block": "", "unit_no": "", "flags": []},
+        ]
+        df = ox.postprocess({"orders": llm_orders, "labels": {}}, CATALOG, msgs)
+        assert set(df["sender"]) == {"Kamlesh Jvv 261"}
+        assert set(df["address"]) == {"House 261"}  # the addition finds the address of the same sender

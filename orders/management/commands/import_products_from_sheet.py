@@ -60,3 +60,8 @@ class Command(BaseCommand):
                 transaction.set_rollback(True)
         prefix = "[dry run] " if dry_run else ""
         self.stdout.write(f"{prefix}created {created}, updated {updated}, skipped {skipped}")
+        if not dry_run:
+            from orders.product_matching import refresh_draft_orders
+            stats = refresh_draft_orders()
+            self.stdout.write(f"draft orders: {stats['lines_matched']} lines matched to products, "
+                              f"{stats['lines_repriced']} re-priced, {stats['orders_updated']} orders updated")

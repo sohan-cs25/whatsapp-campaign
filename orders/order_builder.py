@@ -11,10 +11,8 @@ from typing import List
 import pandas as pd
 from django.db import transaction
 
-from .models import CustomerContact, Order, OrderLine, Product
-
-# Flags that explain where data came from; on their own they do not make an order need review.
-INFO_FLAGS = {"address_from_other_orders", "phone_from_directory"}
+from .models import INFO_FLAGS, PRICING_FLAGS, CustomerContact, Order, OrderLine, Product
+from .product_matching import match_product
 
 
 class RebuildBlocked(Exception):
@@ -57,6 +55,7 @@ def build_orders(parsed_file, orders_df: pd.DataFrame) -> List[Order]:
         return []
 
     products = {p.key: p for p in Product.objects.all()}
+    active_products = [p for p in products.values() if p.is_active]
     built = []
     for sender, rows in orders_df.groupby("sender", sort=False):
         records = rows.to_dict("records")
@@ -85,6 +84,8 @@ def build_orders(parsed_file, orders_df: pd.DataFrame) -> List[Order]:
                 order_flags.add("had_cancellation")
             pid = first.get("product_id") if _present(first.get("product_id")) else None
             product = products.get(pid) if pid else None
+            if product is None:  # not in the catalog the AI saw: try the item's name
+                product = match_product(first["product"], active_products)
             line_specs.append({
                 "product": product,
                 "name": product.name if product else str(first["product"]),
@@ -123,7 +124,8 @@ def build_orders(parsed_file, orders_df: pd.DataFrame) -> List[Order]:
             line.save()
         order.refresh_totals()
 
-        row_flags = {f for r in records for f in _split_flags(r.get("flags"))}
+        # pricing flags come from the lines as priced here, not from the extractor's rows
+        row_flags = {f for r in records for f in _split_flags(r.get("flags"))} - PRICING_FLAGS
         line_flags = {f for l in order.lines.all() for f in l.flags}
         order.review_flags = sorted(row_flags | line_flags | order_flags)
         order.needs_review = (any(bool(r.get("needs_review")) for r in records)

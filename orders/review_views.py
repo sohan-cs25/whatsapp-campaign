@@ -16,6 +16,7 @@ from .models import (ChatMessage, CustomerContact, Order, OrderLine, ParsedChatF
                      normalize_phone)
 from .serializers import (CustomerContactSerializer, ProductSerializer, ReviewOrderSerializer,
                           ReviewOrderUpdateSerializer, chat_message_data)
+from .product_matching import refresh_draft_orders
 from .tasks import send_order_batch
 
 SENT_STATUSES = ('sent', 'delivered', 'read')
@@ -150,9 +151,25 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     pagination_class = None
 
+    def perform_create(self, serializer):
+        serializer.save()
+        refresh_draft_orders()  # unknown "Guava" lines in waiting orders now get this product
+
+    def perform_update(self, serializer):
+        serializer.save()
+        refresh_draft_orders()  # draft orders take the new price; approved/sent ones keep theirs
+
     def perform_destroy(self, instance):
         instance.is_active = False
         instance.save(update_fields=['is_active', 'updated_at'])
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def refresh_review_orders(request, parsed_file_id):
+    """Match unknown lines to the current products and re-price this file's draft orders."""
+    pf = get_object_or_404(ParsedChatFile, id=parsed_file_id, user=request.user)
+    return Response(refresh_draft_orders(Order.objects.filter(parsed_file=pf)))
 
 
 class CustomerContactViewSet(viewsets.ModelViewSet):

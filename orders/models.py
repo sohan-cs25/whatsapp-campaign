@@ -284,6 +284,16 @@ class Order(models.Model):
                        if lines else "")
         self.save()
 
+    def recompute_review_state(self):
+        """Re-derive review_flags and needs_review after lines changed: pricing flags come from
+        the lines as they are now; other flags (cancellations, seller replies...) are kept."""
+        lines = list(self.lines.all())
+        flags = {f for f in (self.review_flags or []) if f not in PRICING_FLAGS}
+        flags |= {f for l in lines for f in (l.flags or [])}
+        self.review_flags = sorted(flags)
+        self.needs_review = bool(self.blocking_issues()) or bool(flags - INFO_FLAGS)
+        self.save(update_fields=['review_flags', 'needs_review', 'updated_at'])
+
     def blocking_issues(self):
         """Reasons this order cannot be approved, in a fixed order."""
         issues = []
@@ -309,6 +319,9 @@ def _rupees(paise):
     paise = paise or 0
     return str(paise // 100) if paise % 100 == 0 else f"{paise / 100:.2f}"
 
+
+# Flags that explain where data came from; on their own they do not make an order need review.
+INFO_FLAGS = {"address_from_other_orders", "phone_from_directory"}
 
 PRICING_FLAGS = {"unknown_product", "unit_mismatch", "missing_quantity", "partial_pack",
                  "rounded_to_whole_packs"}

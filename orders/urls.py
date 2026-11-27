@@ -11,7 +11,8 @@ from .views import (
     send_order_messages,
     resend_payment_success_message
 )
-from .review_views import CustomerContactViewSet, ProductViewSet, review_orders, update_review_order, approve_orders, send_approved_orders
+from .review_views import (CustomerContactViewSet, ProductViewSet, review_orders, update_review_order,
+                           approve_orders, send_approved_orders, refresh_review_orders)
 
 app_name = 'orders'
 
@@ -30,6 +31,7 @@ urlpatterns = [
     path('review/<uuid:parsed_file_id>/', review_orders, name='review-orders'),
     path('review/<uuid:parsed_file_id>/approve/', approve_orders, name='review-approve'),
     path('review/<uuid:parsed_file_id>/send/', send_approved_orders, name='review-send'),
+    path('review/<uuid:parsed_file_id>/refresh/', refresh_review_orders, name='review-refresh'),
 
     # ViewSet URLs
     path('', include(router.urls)),

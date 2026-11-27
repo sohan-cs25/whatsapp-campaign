@@ -354,6 +354,16 @@ def show_review_orders_page():
                 st.error(r.json().get("error", "Could not queue messages"))
         if b3.button("🔄 Refresh", use_container_width=True):
             st.rerun()
+        if st.button("🔗 Match products & refresh prices", use_container_width=True,
+                     help="Price items that showed as unknown_product using the current Products & prices list, "
+                          "and apply price changes to orders not yet approved. Happens automatically when you "
+                          "save products; use this after importing a price sheet."):
+            r = make_api_request(f"{API_ENDPOINTS['orders']['review']}{file_id}/refresh/", "POST", {})
+            if r is not None and r.status_code == 200:
+                d = r.json()
+                st.success(f"Matched {d['lines_matched']} items to products, re-priced {d['lines_repriced']}, "
+                           f"updated {d['orders_updated']} orders.")
+                st.rerun()
 
         seller_msgs = data.get("seller_messages", [])
         if seller_msgs:
@@ -550,7 +560,7 @@ def show_products_editor(products):
                 errors += 1
                 st.error(f"{r['name']}: {resp.json() if resp is not None else 'no response'}")
         if not errors:
-            st.success("Products saved")
+            st.success("Products saved. Orders not yet approved now use these products and prices.")
             st.rerun()
 
 

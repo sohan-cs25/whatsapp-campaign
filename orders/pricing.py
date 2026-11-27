@@ -14,6 +14,10 @@ _BASE = {"kg": ("g", Decimal(1000)), "g": ("g", Decimal(1)),
          "l": ("ml", Decimal(1000)), "ml": ("ml", Decimal(1))}
 
 
+# Counting units that mean "packs" for a product priced per pack (pack_size != 1)
+PACK_UNITS = {"box", "packet"}
+
+
 @dataclass
 class PricedLine:
     unit_price_paise: int
@@ -38,11 +42,14 @@ def price_line(product, quantity: Optional[Decimal], unit: Optional[str]) -> Pri
     unit_price = int((product.price * 100).quantize(Decimal("1"), ROUND_HALF_UP))
     if quantity is None:
         return PricedLine(unit_price, 0, ["missing_quantity"])
-    qty = to_price_unit(Decimal(quantity), unit, product.price_unit)
-    if qty is None:
-        return PricedLine(unit_price, 0, ["unit_mismatch"])
     pack_size = Decimal(getattr(product, "pack_size", 1) or 1)
-    packs = qty / pack_size
+    qty = to_price_unit(Decimal(quantity), unit, product.price_unit)
+    if qty is not None:
+        packs = qty / pack_size
+    elif unit in PACK_UNITS and pack_size != 1:
+        packs = Decimal(quantity)  # "2 boxes" of a product priced per 125 g box
+    else:
+        return PricedLine(unit_price, 0, ["unit_mismatch"])
     flags = []
     if packs != packs.to_integral_value():
         if getattr(product, "whole_packs_only", False):

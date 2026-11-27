@@ -245,8 +245,14 @@ class ReviewOrderUpdateSerializer(serializers.Serializer):
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
-        fields = ['id', 'key', 'name', 'price', 'price_unit', 'is_active', 'updated_at']
+        fields = ['id', 'key', 'name', 'price', 'price_unit', 'pack_size', 'whole_packs_only', 'is_active',
+                  'updated_at']
         read_only_fields = ['id', 'updated_at']
+
+    def validate_pack_size(self, value):
+        if value is None or value <= 0:
+            raise serializers.ValidationError("Must be more than 0 (the price is for this many units)")
+        return value
 
 
 class CustomerContactSerializer(serializers.ModelSerializer):

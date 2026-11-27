@@ -22,6 +22,11 @@ class Product(models.Model):
     name = models.CharField(max_length=120)
     price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Price in rupees per price_unit")
     price_unit = models.CharField(max_length=10, choices=UNIT_CHOICES)
+    pack_size = models.DecimalField(max_digits=10, decimal_places=3, default=1,
+                                    help_text="The price is for this many price_units: 45 per 250 g -> 250")
+    whole_packs_only = models.BooleanField(default=False,
+                                           help_text="Round orders up to whole packs (sealed packs) instead of "
+                                                     "pricing part of a pack")
     is_active = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -30,14 +35,19 @@ class Product(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return f"{self.name} (₹{self.price}/{self.price_unit})"
+        return f"{self.name} (₹{self.price}/{self.price_per})"
+
+    @property
+    def price_per(self) -> str:
+        """'kg' for a per-unit price, '250 g' for a price per 250 g."""
+        return self.price_unit if self.pack_size == 1 else f"{_fmt_qty(self.pack_size)} {self.price_unit}"
 
     @classmethod
     def as_catalog(cls):
         """Active products in the catalog format order_extractor expects."""
         return [
-            {"id": p.key, "name": p.name, "price": float(p.price), "price_per": p.price_unit,
-             "first_announced_id": "", "notes": None}
+            {"id": p.key, "name": p.name, "price": float(p.price), "price_per": p.price_per,
+             "first_announced_id": "", "notes": "sold in whole packs only" if p.whole_packs_only else None}
             for p in cls.objects.filter(is_active=True)
         ]
 
@@ -300,7 +310,8 @@ def _rupees(paise):
     return str(paise // 100) if paise % 100 == 0 else f"{paise / 100:.2f}"
 
 
-PRICING_FLAGS = {"unknown_product", "unit_mismatch", "missing_quantity"}
+PRICING_FLAGS = {"unknown_product", "unit_mismatch", "missing_quantity", "partial_pack",
+                 "rounded_to_whole_packs"}
 
 
 class OrderLine(models.Model):

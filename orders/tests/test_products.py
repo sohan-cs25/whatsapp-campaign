@@ -49,7 +49,7 @@ class ImportCommandTests(TestCase):
         assert Product.objects.get(key="lychee").price_unit == "box"
 
     def test_import_rejects_bad_unit(self):
-        out = run_import([{"name": "Mango", "price": 120, "unit": "kgs"}])
+        out = run_import([{"name": "Mango", "price": 120, "unit": "sack"}])
         assert "skipped 1" in out and not Product.objects.exists()
 
     def test_dry_run_writes_nothing(self):

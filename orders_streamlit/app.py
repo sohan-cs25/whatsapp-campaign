@@ -11,7 +11,7 @@ import json
 import re
 from datetime import datetime
 import time
-from product_rows import product_row_changed
+from product_rows import price_label, product_row_changed
 from config import API_BASE_URL, API_ENDPOINTS, APP_NAME, APP_ICON, PAGE_ICON, LAYOUT
 
 # Page configuration
@@ -457,12 +457,14 @@ def show_review_order(order, file_id, product_by_key, active_keys):
         lines_df = pd.DataFrame([{
             "product": l["product"], "name": l["name"],
             "quantity": float(l["quantity"]) if l["quantity"] is not None else None,
-            "unit": l["unit"] or None, "line total": rupees(l["line_total_paise"]),
+            "unit": l["unit"] or None,
+            "price": price_label(product_by_key[l["product"]]) if l["product"] in product_by_key else "",
+            "line total": rupees(l["line_total_paise"]),
             "flags": ", ".join(l["flags"]),
-        } for l in order["lines"]], columns=["product", "name", "quantity", "unit", "line total", "flags"])
+        } for l in order["lines"]], columns=["product", "name", "quantity", "unit", "price", "line total", "flags"])
         edited = st.data_editor(
             lines_df, key=f"lines_{oid}", num_rows="dynamic" if editable else "fixed",
-            disabled=not editable or ["line total", "flags"], use_container_width=True,
+            disabled=not editable or ["price", "line total", "flags"], use_container_width=True,
             column_config={
                 "product": st.column_config.SelectboxColumn("Product", options=active_keys),
                 "unit": st.column_config.SelectboxColumn("Unit", options=UNITS),
@@ -506,23 +508,37 @@ def show_review_order(order, file_id, product_by_key, active_keys):
 
 
 def show_products_editor(products):
-    st.caption("Prices used for every order line. Price is in rupees per unit.")
-    df = pd.DataFrame(products, columns=["id", "key", "name", "price", "price_unit", "is_active"])
+    st.caption("Prices used for every order line. The price is for **Per qty × Unit**: "
+               "₹45, Per qty 250, Unit g means ₹45 per 250 g. Leave Per qty at 1 for a price per kg, "
+               "per piece, per bunch… Tick **Whole packs only** for sealed packs: orders are rounded up "
+               "to whole packs instead of charging for part of a pack.")
+    rows = [dict(p, per=price_label(p)) for p in products]
+    df = pd.DataFrame(rows, columns=["id", "key", "name", "price", "pack_size", "price_unit",
+                                     "whole_packs_only", "per", "is_active"])
+    df["pack_size"] = pd.to_numeric(df["pack_size"]).astype(float)
     edited = st.data_editor(
         df, key="products_editor", num_rows="dynamic", use_container_width=True,
-        disabled=["id"], hide_index=True,
+        disabled=["id", "per"], hide_index=True,
         column_config={
-            "price_unit": st.column_config.SelectboxColumn("Unit", options=UNITS),
-            "price": st.column_config.NumberColumn("Price (₹)", min_value=0.0, step=1.0),
             "key": st.column_config.TextColumn("Key (snake_case)"),
+            "price": st.column_config.NumberColumn("Price (₹)", min_value=0.0, step=1.0),
+            "pack_size": st.column_config.NumberColumn("Per qty", min_value=0.001, step=1.0, default=1.0,
+                                                       help="The price is for this many units, e.g. 250 (g)"),
+            "price_unit": st.column_config.SelectboxColumn("Unit", options=UNITS),
+            "whole_packs_only": st.column_config.CheckboxColumn("Whole packs only", default=False),
+            "per": st.column_config.TextColumn("Reads as"),
+            "is_active": st.column_config.CheckboxColumn("Active", default=True),
         },
     )
     if st.button("💾 Save products"):
         errors = 0
         original = {p["id"]: p for p in products}
         for _, r in edited.iterrows():
+            pack = r["pack_size"] if pd.notna(r["pack_size"]) else 1
             body = {"key": r["key"], "name": r["name"], "price": str(r["price"]),
-                    "price_unit": r["price_unit"], "is_active": bool(r["is_active"]) if pd.notna(r["is_active"]) else True}
+                    "pack_size": str(pack), "price_unit": r["price_unit"],
+                    "whole_packs_only": bool(r["whole_packs_only"]) if pd.notna(r["whole_packs_only"]) else False,
+                    "is_active": bool(r["is_active"]) if pd.notna(r["is_active"]) else True}
             if pd.isna(r["id"]):
                 resp = make_api_request(API_ENDPOINTS['orders']['products'], "POST", body)
             else:

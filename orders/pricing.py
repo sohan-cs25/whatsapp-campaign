@@ -1,7 +1,12 @@
-"""Line pricing in integer paise. Pure functions; the only conversions are kg<->g and l<->ml."""
+"""Line pricing in integer paise. Pure functions; the only conversions are kg<->g and l<->ml.
+
+A product's price is for pack_size x price_unit (default 1): "45 per 250 g" is price 45,
+price_unit g, pack_size 250. An order is priced as packs x price, where packs = quantity
+(in price_unit) / pack_size. Part of a pack is priced proportionally and flagged
+partial_pack, or rounded up and flagged rounded_to_whole_packs for whole_packs_only products."""
 
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from typing import List, Optional
 
 # unit -> (base unit, multiplier to base)
@@ -36,5 +41,14 @@ def price_line(product, quantity: Optional[Decimal], unit: Optional[str]) -> Pri
     qty = to_price_unit(Decimal(quantity), unit, product.price_unit)
     if qty is None:
         return PricedLine(unit_price, 0, ["unit_mismatch"])
-    total = int((qty * unit_price).quantize(Decimal("1"), ROUND_HALF_UP))
-    return PricedLine(unit_price, total, [])
+    pack_size = Decimal(getattr(product, "pack_size", 1) or 1)
+    packs = qty / pack_size
+    flags = []
+    if packs != packs.to_integral_value():
+        if getattr(product, "whole_packs_only", False):
+            packs = packs.to_integral_value(ROUND_CEILING)
+            flags.append("rounded_to_whole_packs")
+        elif pack_size != 1:
+            flags.append("partial_pack")
+    total = int((packs * unit_price).quantize(Decimal("1"), ROUND_HALF_UP))
+    return PricedLine(unit_price, total, flags)

@@ -107,23 +107,21 @@ class OrderWhatsAppService:
 
     @staticmethod
     def line_to_whatsapp_item(line) -> Dict[str, Any]:
-        """One order_details item for an OrderLine. Whole quantities in the product's price unit are
-        sent as quantity x unit price; anything else as one item priced at the line total, so the
-        items always add up exactly to the order total."""
+        """One order_details item for an OrderLine. A line that is a whole number of packs is sent
+        as packs x pack price ("Mushroom (250 g)" x 4); anything else as one item priced at the
+        line total. Either way the items add up exactly to the order total."""
         from .models import _fmt_qty
-        from .pricing import to_price_unit
 
-        qty = None
-        if line.product is not None and line.quantity is not None:
-            qty = to_price_unit(line.quantity, line.unit or None, line.product.price_unit)
-        # Split into quantity x unit price only when that reproduces the stored line total; the
-        # product's price unit may have changed since the line was priced.
-        if (qty is not None and qty >= 1 and qty == qty.to_integral_value()
-                and int(qty) * line.unit_price_paise == line.line_total_paise):
-            name, quantity, value = line.name, int(qty), line.unit_price_paise
+        unit_price, total = line.unit_price_paise, line.line_total_paise
+        packs = total // unit_price if unit_price and total and total % unit_price == 0 else 0
+        product = line.product
+        if packs >= 1 and product is not None:
+            pack_size = getattr(product, "pack_size", 1) or 1
+            name = line.name if pack_size == 1 else f"{line.name} ({_fmt_qty(pack_size)} {product.price_unit})"
+            quantity, value = int(packs), unit_price
         else:
             suffix = f" ({_fmt_qty(line.quantity)} {line.unit})".rstrip() if line.quantity is not None else ""
-            name, quantity, value = f"{line.name}{suffix}", 1, line.line_total_paise
+            name, quantity, value = f"{line.name}{suffix}", 1, total
         return {
             "amount": {"offset": 100, "value": value},
             "name": name,
